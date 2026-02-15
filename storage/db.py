@@ -18,9 +18,6 @@ _local = threading.local()
 def _ensure_dir() -> None:
     Path(config.DUCKDB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
-
-import threading
-
 _db_lock = threading.Lock()
 
 def get_conn() -> duckdb.DuckDBPyConnection:

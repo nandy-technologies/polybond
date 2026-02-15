@@ -22,16 +22,16 @@ _RATE_LIMIT_SECONDS: float = 30 * 60  # 30 minutes
 # ---------------------------------------------------------------------------
 
 async def send_alert(message: str) -> bool:
-    """Send an alert via the openclaw gateway.
+    """Send an alert via openclaw message send.
 
-    Executes ``openclaw gateway wake --text '<message>' --mode now`` as a
-    subprocess.  Returns ``True`` if the command exits successfully.
+    Executes ``openclaw message send --target imessage --message '<msg>'``
+    as a subprocess.  Returns ``True`` if the command exits successfully.
     """
     if not config.ALERT_ENABLED:
         log.debug("alerts_disabled", message=message[:80])
         return False
 
-    cmd = ["openclaw", "gateway", "wake", "--text", message, "--mode", "now"]
+    cmd = ["openclaw", "message", "send", "--target", "imessage", "--message", message]
 
     try:
         proc = await asyncio.create_subprocess_exec(

@@ -268,7 +268,7 @@ _DASHBOARD_HTML = """\
   </style>
 </head>
 <body>
-<nav id="nandy-nav"><a class="nn-brand" href="/"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAErElEQVR4nO1Xe0xbVRi/595b2t4+QN5LDIyHg1yYIujwH0WSuTEWl6m7kDFnnSOwgUAUAlocl1IYCJvANl66oE0YMa0sLtkjAhvb2GBD4ma2EhMgC/IQsKUw1lJK773mVGrAOIQ2wxj9/XHOd06/x+983/nOTRHkf/xLAeBA56T50tmHvJfurRWoI0ZqikIpisK83aXP+vi6hnMcjcK9dSFA0zQauHUrqtFoGIHULZIBRCQAChYhSQz+hjwpUBSFcUvSLM9N336uuXao9VvVgzOqmpglqmAtRMDfKUBnhYWFHACAg+uyYvkO3GpKnn9kELm6uYE587zRZDIzm0JCxAjGr9yb/GGr3Q7OCoWCdYgARVEYSZKc3YE8U/YWxzL7cR6P85S63FuYNzVtDIkoFUtcMZ1ed+QpKREzMPAgjkV5oxjOb8rMU3ZCO47jMDgBAP6SCP7nDbWawigtyQGFgoHrhpqSGDLA/6Ouzmtegz8P5433ft/zQnx8wcIC22zQ/SpiLGZ0amLy8/FRpiqn6NSu8vyMbUGkf/WtjnOzXb0/KAAAV1bKCHhcBmpK815/ZJxJ8/D0miGEwsqkVPltTWPFmyajKW9keOhufnljdrXyg1yG5cwldNXJknJ5Y0DgRj+A8Qu2vfFO61lVza772ntpoWS4IX7PvlKx2P3HFUvAcRyUQV21Mj44wD/bajYi1zsuHy+rbzlfqciK9vPzK7KY51jPDYHyzS9FjzXXVR+QSkSpAkKIDQ3/0rLlxdeKBRJm8/Bg//sTE7o5QuiiSs0ta79+4cxpoUiS2NXV3ca64A3Ts+jlwsJCxn6nUHt64EbGu0mbTNP6I6NDg83xiWmxz215ZarjfNN3gUFBiv6f7iv3Hv5kR1vbxYg7ne3dHl4++u7bvSc6Ojor+Xz+gFDCXdBNTPokHZLv6bnZdVIk5B9tri/tuXGlraGhShllMExpdGNjSdMTA0Ewlr0kYGk6ZLIYgUp1zQzl9P27PZ4JDf5SKpV+/V5GQXP7pZZIiRD/7Gbn1Zmph4ac4oqv+o8VpGexVgbkHq2v+uI4HYzz8XK9foaLi9upDI+OvVv7qTzZbLHs7LaKEjUKhQVBEEwmi+HZYzz2DsCLqNEgCHxs4DpNRvlGRpA3XN09cilZ5lm7zp2reDLB5yMhI8bTCYu6dccK9mE4VvzNxUtRra23pmwZpiiXPgRh7P5WDZqmURiITkkhtr8cusEemKYpFygXZR9IOaHMSl3UdVGr1bDlkN2xUUHZ2W+L4BqAZWd06HvxB+wBIAk4l32cerAi//DBpXtrfY7R1SpCxwkJCYsppGyjSEKwcxbLslPBPl8LCXS1issfEI1tNBvnrIBluZV1VwaOOACtdtJ2ag7hBAJCYEu9Vks6VF8ccQIGw0MUYKgVymFhfdy6Eejr87YFGxmfnCbEhK2MsG0dAYo4ATFBiHmIrQIOA3XEiCR/r/fzEeECP7+neVCmqHUkYIfVasH4PMzdmUuIIk7AbDQJUIS1EXAUqFPGOA9nEdTW86866AN3hoDFumAd100boVzbt45tGLYYTK+bHbfOM/Az+8+ApmmUe5L/BZD/An4DmrH2f7rXvCEAAAAASUVORK5CYII=" alt="N" style="height:22px;width:auto;vertical-align:middle"></a><script>(function(){var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;var n=document.getElementById('nandy-nav'),ls=[['HYPE Bot',8082],['Polymarket',8083]];ls.forEach(function(d){var a=document.createElement('a');a.className='nn-link';a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];if(location.port==d[1])a.classList.add('nn-active');n.appendChild(a)});var dd=document.createElement('div');dd.className='nn-dropdown';var games=[['Tide Pools',8084]];var isGA=games.some(function(g){return location.port==g[1]});var tog=document.createElement('button');tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';dd.appendChild(tog);var mn=document.createElement('div');mn.className='nn-dropdown-menu';games.forEach(function(g){var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a)});dd.appendChild(mn);n.appendChild(dd);tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});document.addEventListener('click',function(){dd.classList.remove('open')})})();</script></nav>
+<nav id="nandy-nav"><a class="nn-brand" href="/"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAErElEQVR4nO1Xe0xbVRi/595b2t4+QN5LDIyHg1yYIujwH0WSuTEWl6m7kDFnnSOwgUAUAlocl1IYCJvANl66oE0YMa0sLtkjAhvb2GBD4ma2EhMgC/IQsKUw1lJK773mVGrAOIQ2wxj9/XHOd06/x+983/nOTRHkf/xLAeBA56T50tmHvJfurRWoI0ZqikIpisK83aXP+vi6hnMcjcK9dSFA0zQauHUrqtFoGIHULZIBRCQAChYhSQz+hjwpUBSFcUvSLM9N336uuXao9VvVgzOqmpglqmAtRMDfKUBnhYWFHACAg+uyYvkO3GpKnn9kELm6uYE587zRZDIzm0JCxAjGr9yb/GGr3Q7OCoWCdYgARVEYSZKc3YE8U/YWxzL7cR6P85S63FuYNzVtDIkoFUtcMZ1ed+QpKREzMPAgjkV5oxjOb8rMU3ZCO47jMDgBAP6SCP7nDbWawigtyQGFgoHrhpqSGDLA/6Ouzmtegz8P5433ft/zQnx8wcIC22zQ/SpiLGZ0amLy8/FRpiqn6NSu8vyMbUGkf/WtjnOzXb0/KAAAV1bKCHhcBmpK815/ZJxJ8/D0miGEwsqkVPltTWPFmyajKW9keOhufnljdrXyg1yG5cwldNXJknJ5Y0DgRj+A8Qu2vfFO61lVza772ntpoWS4IX7PvlKx2P3HFUvAcRyUQV21Mj44wD/bajYi1zsuHy+rbzlfqciK9vPzK7KY51jPDYHyzS9FjzXXVR+QSkSpAkKIDQ3/0rLlxdeKBRJm8/Bg//sTE7o5QuiiSs0ta79+4cxpoUiS2NXV3ca64A3Ts+jlwsJCxn6nUHt64EbGu0mbTNP6I6NDg83xiWmxz215ZarjfNN3gUFBiv6f7iv3Hv5kR1vbxYg7ne3dHl4++u7bvSc6Ojor+Xz+gFDCXdBNTPokHZLv6bnZdVIk5B9tri/tuXGlraGhShllMExpdGNjSdMTA0Ewlr0kYGk6ZLIYgUp1zQzl9P27PZ4JDf5SKpV+/V5GQXP7pZZIiRD/7Gbn1Zmph4ac4oqv+o8VpGexVgbkHq2v+uI4HYzz8XK9foaLi9upDI+OvVv7qTzZbLHs7LaKEjUKhQVBEEwmi+HZYzz2DsCLqNEgCHxs4DpNRvlGRpA3XN09cilZ5lm7zp2reDLB5yMhI8bTCYu6dccK9mE4VvzNxUtRra23pmwZpiiXPgRh7P5WDZqmURiITkkhtr8cusEemKYpFygXZR9IOaHMSl3UdVGr1bDlkN2xUUHZ2W+L4BqAZWd06HvxB+wBIAk4l32cerAi//DBpXtrfY7R1SpCxwkJCYsppGyjSEKwcxbLslPBPl8LCXS1issfEI1tNBvnrIBluZV1VwaOOACtdtJ2ag7hBAJCYEu9Vks6VF8ccQIGw0MUYKgVymFhfdy6Eejr87YFGxmfnCbEhK2MsG0dAYo4ATFBiHmIrQIOA3XEiCR/r/fzEeECP7+neVCmqHUkYIfVasH4PMzdmUuIIk7AbDQJUIS1EXAUqFPGOA9nEdTW86866AN3hoDFumAd100boVzbt45tGLYYTK+bHbfOM/Az+8+ApmmUe5L/BZD/An4DmrH2f7rXvCEAAAAASUVORK5CYII=" alt="N" style="height:22px;width:auto;vertical-align:middle"></a><script>(function(){var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;var n=document.getElementById('nandy-nav'),ls=[['HYPE Bot',8082],['Polymarket',8083],['Universe',9090]];ls.forEach(function(d){var a=document.createElement('a');a.className='nn-link';a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];if(location.port==d[1])a.classList.add('nn-active');n.appendChild(a)});var dd=document.createElement('div');dd.className='nn-dropdown';var games=[['Tide Pools',8084]];var isGA=games.some(function(g){return location.port==g[1]});var tog=document.createElement('button');tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';dd.appendChild(tog);var mn=document.createElement('div');mn.className='nn-dropdown-menu';games.forEach(function(g){var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a)});dd.appendChild(mn);n.appendChild(dd);tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});document.addEventListener('click',function(){dd.classList.remove('open')})})();</script></nav>
   <header>
     <div class="header-left">
       <h1>Polymarket Copy-Trading Bot</h1>
@@ -321,7 +321,7 @@ _DASHBOARD_HTML = """\
       <div class="panel">
         <h2>Live Feed <span class="badge" id="feed-count">0 events</span></h2>
         <div id="live-feed">
-          <div class="empty-state" id="feed-empty">Connecting to live stream...</div>
+          <div class="empty-state" id="feed-empty">Connecting to live stream&hellip;</div>
         </div>
       </div>
 
@@ -352,14 +352,14 @@ _DASHBOARD_HTML = """\
         <h2>Recent Trades <span class="badge">Last {{ recent_trades|length }}</span></h2>
         {% if recent_trades %}
         <table>
-          <thead><tr><th>Time</th><th>Wallet</th><th>Side</th><th class="num">USD</th><th class="num">Price</th><th>Market</th></tr></thead>
+          <thead><tr><th>Time</th><th>Wallet</th><th>Side</th><th class="num">Size</th><th class="num">Price</th><th>Market</th></tr></thead>
           <tbody>
             {% for t in recent_trades %}
             <tr>
               <td class="timestamp">{{ t.ts }}</td>
               <td><a class="addr" href="/api/wallet/{{ t.wallet }}">{{ t.wallet[:8] }}...{{ t.wallet[-4:] }}</a></td>
               <td class="side-{{ t.side|lower }}">{{ t.side }}</td>
-              <td class="num">${{ "{:,.0f}".format(t.usd_value) }}</td>
+              <td class="num" style="color:var(--accent)">{% if t.usd_value >= 10000 %}■■■■{% elif t.usd_value >= 5000 %}■■■{% elif t.usd_value >= 2000 %}■■{% else %}■{% endif %}</td>
               <td class="num">{{ "%.3f"|format(t.price) }}</td>
               <td>{{ t.market_id[:24] }}{% if t.market_id|length > 24 %}...{% endif %}</td>
             </tr>
@@ -387,8 +387,8 @@ _DASHBOARD_HTML = """\
         <h2>Quick P&amp;L <span class="badge">{{ paper_stats.total }} trades</span></h2>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl > 0 else 'pnl-negative' if paper_stats.realized_pnl < 0 else '' }}">${{ "{:,.0f}".format(paper_stats.equity) }}</div>
-            <div class="label">Equity</div>
+            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</div>
+            <div class="label">Return</div>
           </div>
           <div class="stat-card"><div class="value">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</div><div class="label">Win Rate</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.open }}</div><div class="label">Open</div></div>
@@ -410,22 +410,22 @@ _DASHBOARD_HTML = """\
         <h2>Performance Stats</h2>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl >= 0 else 'pnl-negative' }}">${{ "{:,.0f}".format(paper_stats.equity) }}</div>
-            <div class="label">Equity</div>
+            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</div>
+            <div class="label">Return</div>
           </div>
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl > 0 else 'pnl-negative' }}">${{ "{:+,.0f}".format(paper_stats.realized_pnl) }}</div>
+            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl > 0 else 'pnl-negative' }}">{{ "{:+.1f}".format(paper_stats.realized_pnl / 1000 * 100) }}%</div>
             <div class="label">Realized P&amp;L</div>
           </div>
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.unrealized_pnl > 0 else 'pnl-negative' }}">${{ "{:+,.0f}".format(paper_stats.unrealized_pnl) }}</div>
+            <div class="value {{ 'pnl-positive' if paper_stats.unrealized_pnl > 0 else 'pnl-negative' }}">{{ "{:+.1f}".format(paper_stats.unrealized_pnl / 1000 * 100) }}%</div>
             <div class="label">Unrealized</div>
           </div>
           <div class="stat-card"><div class="value">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</div><div class="label">Win Rate</div></div>
-          <div class="stat-card"><div class="value">${{ "{:,.0f}".format(paper_stats.avg_win) }}</div><div class="label">Avg Win</div></div>
-          <div class="stat-card"><div class="value">${{ "{:,.0f}".format(paper_stats.avg_loss) }}</div><div class="label">Avg Loss</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.profit_factor }}</div><div class="label">Profit Factor</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.sharpe }}</div><div class="label">Sharpe</div></div>
+          <div class="stat-card"><div class="value">{{ paper_stats.total }}</div><div class="label">Total Trades</div></div>
+          <div class="stat-card"><div class="value">{{ paper_stats.closed }}</div><div class="label">Closed</div></div>
         </div>
       </div>
 
@@ -433,7 +433,7 @@ _DASHBOARD_HTML = """\
         <h2>Open Positions <span class="badge">{{ open_positions|length }}</span></h2>
         {% if open_positions %}
         <table>
-          <thead><tr><th>Market</th><th>Direction</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Size</th><th class="num">P&amp;L</th><th>Age</th></tr></thead>
+          <thead><tr><th>Market</th><th>Direction</th><th class="num">Entry</th><th class="num">Current</th><th class="num">P&amp;L</th><th>Age</th></tr></thead>
           <tbody>
             {% for p in open_positions %}
             <tr>
@@ -441,8 +441,7 @@ _DASHBOARD_HTML = """\
               <td class="side-{{ p.direction|lower }}">{{ p.direction }}</td>
               <td class="num">{{ "%.3f"|format(p.entry_price) }}</td>
               <td class="num">{{ "%.3f"|format(p.current_price) }}</td>
-              <td class="num">${{ "{:,.0f}".format(p.simulated_size) }}</td>
-              <td class="num {{ 'pnl-positive' if p.pnl > 0 else 'pnl-negative' if p.pnl < 0 else 'pnl-neutral' }}">${{ "{:+,.0f}".format(p.pnl) }} ({{ "{:+.1f}".format(p.pnl_pct) }}%)</td>
+              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}">{{ "{:+.1f}".format(p.pnl_pct) }}%</td>
               <td class="timestamp">{{ p.age }}</td>
             </tr>
             {% endfor %}
@@ -455,7 +454,7 @@ _DASHBOARD_HTML = """\
         <h2>Closed Positions <span class="badge">Last {{ closed_positions|length }}</span></h2>
         {% if closed_positions %}
         <table>
-          <thead><tr><th>Market</th><th>Direction</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Size</th><th class="num">P&amp;L</th><th>Reason</th></tr></thead>
+          <thead><tr><th>Market</th><th>Direction</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th>Reason</th></tr></thead>
           <tbody>
             {% for p in closed_positions %}
             <tr>
@@ -463,8 +462,7 @@ _DASHBOARD_HTML = """\
               <td class="side-{{ p.direction|lower }}">{{ p.direction }}</td>
               <td class="num">{{ "%.3f"|format(p.entry_price) }}</td>
               <td class="num">{{ "%.3f"|format(p.current_price) }}</td>
-              <td class="num">${{ "{:,.0f}".format(p.simulated_size) }}</td>
-              <td class="num {{ 'pnl-positive' if p.pnl > 0 else 'pnl-negative' if p.pnl < 0 else 'pnl-neutral' }}">${{ "{:+,.0f}".format(p.pnl) }}</td>
+              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}">{{ "{:+.1f}".format(p.pnl_pct) }}%</td>
               <td class="timestamp">{{ p.close_reason or '—' }}</td>
             </tr>
             {% endfor %}
@@ -477,7 +475,7 @@ _DASHBOARD_HTML = """\
       <div class="panel panel-wide">
         <h2>Recommended Thresholds <span class="badge">display only</span></h2>
         <table>
-          <thead><tr><th>Elo ≥</th><th>Alpha ≥</th><th>Confidence ≥</th><th class="num">Win Rate</th><th class="num">Avg P&amp;L</th><th class="num">Sharpe</th><th class="num">Profit Factor</th><th class="num">Samples</th></tr></thead>
+          <thead><tr><th>Elo ≥</th><th>Alpha ≥</th><th>Confidence ≥</th><th class="num">Win Rate</th><th class="num">Sharpe</th><th class="num">Profit Factor</th><th class="num">Samples</th></tr></thead>
           <tbody>
             {% for t in tuning_results %}
             <tr>
@@ -485,7 +483,6 @@ _DASHBOARD_HTML = """\
               <td>{{ "%.1f"|format(t.alpha_cutoff) }}</td>
               <td>{{ "%.0f"|format(t.min_confidence) }}</td>
               <td class="num">{{ "%.0f"|format(t.win_rate * 100) }}%</td>
-              <td class="num {{ 'pnl-positive' if t.avg_pnl > 0 else 'pnl-negative' }}">${{ "{:+,.0f}".format(t.avg_pnl) }}</td>
               <td class="num">{{ t.sharpe }}</td>
               <td class="num">{{ t.profit_factor }}</td>
               <td class="num">{{ t.sample_size }}</td>
@@ -581,7 +578,8 @@ _DASHBOARD_HTML = """\
     <span>&middot;</span>
     <span>Last rendered <span id="last-rendered-time">{{ rendered_at }}</span></span>
     <span>&middot;</span>
-    <a href="http://mac-mini.tail:9090" style="color:var(--accent);text-decoration:none;">Nandy Universe</a>
+    <a id="universe-link" href="#" style="color:var(--accent);text-decoration:none;">Nandy Universe</a>
+    <script>document.getElementById('universe-link').href='//'+location.hostname+':9090/'+(new URLSearchParams(location.search).get('token')?'?token='+encodeURIComponent(new URLSearchParams(location.search).get('token')):'');</script>
   </footer>
 
   <script>
@@ -608,14 +606,24 @@ _DASHBOARD_HTML = """\
     Chart.defaults.plugins.tooltip.titleFont = { family: "'DM Sans'", weight: 700 };
     Chart.defaults.plugins.tooltip.bodyFont = { family: "'SF Mono', monospace" };
 
+    // SSE helper with auto-reconnect
+    function connectSSE(url, onMessage) {
+      var src = new EventSource(url);
+      src.onmessage = onMessage;
+      src.onerror = function() {
+        src.close();
+        setTimeout(function(){ connectSSE(url, onMessage); }, 5000);
+      };
+      return src;
+    }
+
     // SSE live feed
     (function() {
       const feed = document.getElementById('live-feed');
       const feedEmpty = document.getElementById('feed-empty');
       const feedCount = document.getElementById('feed-count');
       let eventCount = 0;
-      const source = new EventSource('/api/stream');
-      source.onmessage = function(e) {
+      connectSSE('/api/stream', function(e) {
         try {
           const data = JSON.parse(e.data);
           if (feedEmpty) feedEmpty.remove();
@@ -628,13 +636,13 @@ _DASHBOARD_HTML = """\
           const sw = w.length > 10 ? w.slice(0,6)+'...'+w.slice(-4) : w;
           const side = data.side || '?';
           const sc = side === 'BUY' ? 'side-buy' : side === 'SELL' ? 'side-sell' : '';
-          const usd = data.usd_value ? '$'+Math.round(data.usd_value).toLocaleString() : '';
+          var sz = data.usd_value >= 10000 ? '■■■■' : data.usd_value >= 5000 ? '■■■' : data.usd_value >= 2000 ? '■■' : '■';
           function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-          item.innerHTML = '<span class="feed-time">'+esc(ts)+'</span><span class="feed-wallet">'+esc(sw)+'</span><span class="'+esc(sc)+'">'+esc(side)+'</span> <span class="feed-amount">'+esc(usd)+'</span> <span style="color:var(--text-muted)">@ '+(data.price||0).toFixed(3)+'</span>';
+          item.innerHTML = '<span class="feed-time">'+esc(ts)+'</span><span class="feed-wallet">'+esc(sw)+'</span><span class="'+esc(sc)+'">'+esc(side)+'</span> <span class="feed-amount" style="color:var(--accent)">'+sz+'</span> <span style="color:var(--text-muted)">@ '+(data.price||0).toFixed(3)+'</span>';
           feed.insertBefore(item, feed.firstChild);
           while (feed.children.length > 100) feed.removeChild(feed.lastChild);
         } catch(err) {}
-      };
+      });
     })();
 
     // SSE signal feed
@@ -643,8 +651,7 @@ _DASHBOARD_HTML = """\
       const feedEmpty = document.getElementById('signal-empty');
       const feedCount = document.getElementById('signal-count');
       let count = 0;
-      const source = new EventSource('/api/signal-stream');
-      source.onmessage = function(e) {
+      connectSSE('/api/signal-stream', function(e) {
         try {
           const d = JSON.parse(e.data);
           if (feedEmpty) feedEmpty.remove();
@@ -659,7 +666,7 @@ _DASHBOARD_HTML = """\
           feed.insertBefore(item, feed.firstChild);
           while (feed.children.length > 100) feed.removeChild(feed.lastChild);
         } catch(err) {}
-      };
+      });
     })();
 
     // Equity chart
@@ -667,13 +674,14 @@ _DASHBOARD_HTML = """\
       const ctx = document.getElementById('equity-chart');
       if (!ctx) return;
       fetch('/api/equity-curve').then(r=>r.json()).then(data => {
+        var base = data.length > 0 ? data[0].equity : 1000;
         new Chart(ctx, {
           type: 'line',
           data: {
             labels: data.map(d => d.ts),
             datasets: [{
-              label: 'Equity ($)',
-              data: data.map(d => d.equity),
+              label: 'Return %',
+              data: data.map(d => ((d.equity / base) - 1) * 100),
               borderColor: '#c9a96e',
               backgroundColor: 'rgba(201,169,110,0.1)',
               fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
@@ -684,7 +692,7 @@ _DASHBOARD_HTML = """\
             plugins: { legend: { display: false } },
             scales: {
               x: { display: true, grid: { color: '#2a2a2a' }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
-              y: { grid: { color: '#2a2a2a' }, ticks: { font: { size: 10 } } }
+              y: { grid: { color: '#2a2a2a' }, ticks: { font: { size: 10 }, callback: function(v){ return v.toFixed(1)+'%'; } } }
             }
           }
         });
@@ -969,14 +977,21 @@ async def _fetch_clusters() -> list[dict]:
         return []
 
 
+_EMPTY_PAPER_STATS = {
+    "total": 0, "open": 0, "closed": 0, "wins": 0, "losses": 0,
+    "win_rate": 0, "realized_pnl": 0, "unrealized_pnl": 0,
+    "equity": 1000, "avg_win": 0, "avg_loss": 0, "profit_factor": 0, "sharpe": 0,
+}
+
+
 async def _fetch_paper_stats() -> dict:
     try:
         from paper_trading.engine import get_paper_stats
-        return await get_paper_stats()
+        stats = await get_paper_stats()
+        # Ensure all keys present (get_paper_stats may short-circuit with {"total": 0})
+        return {**_EMPTY_PAPER_STATS, **stats}
     except Exception:
-        return {"total": 0, "open": 0, "closed": 0, "wins": 0, "losses": 0,
-                "win_rate": 0, "realized_pnl": 0, "unrealized_pnl": 0,
-                "equity": 1000, "avg_win": 0, "avg_loss": 0, "profit_factor": 0, "sharpe": 0}
+        return dict(_EMPTY_PAPER_STATS)
 
 
 async def _fetch_open_positions() -> list[dict]:
@@ -1012,14 +1027,15 @@ async def _fetch_closed_positions(limit: int = 30) -> list[dict]:
         rows = await asyncio.to_thread(
             query,
             """SELECT id, market_id, market_question, direction, entry_price, current_price,
-                      simulated_size, pnl, close_reason
+                      simulated_size, pnl, close_reason, pnl_pct
                FROM paper_trades_v2 WHERE status = 'closed' ORDER BY closed_at DESC LIMIT ?""",
             [limit],
         )
         return [
             {"id": r[0], "market_id": r[1], "market_question": r[2] or "",
              "direction": r[3] or "?", "entry_price": r[4] or 0, "current_price": r[5] or 0,
-             "simulated_size": r[6] or 0, "pnl": r[7] or 0, "close_reason": r[8]}
+             "simulated_size": r[6] or 0, "pnl": r[7] or 0, "close_reason": r[8],
+             "pnl_pct": r[9] or 0}
             for r in rows
         ]
     except Exception:

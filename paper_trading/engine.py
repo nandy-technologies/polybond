@@ -118,7 +118,9 @@ def bootstrap_paper_tables() -> None:
         # Indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_tier ON signals(tier)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_wallet ON signals(wallet)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_p2_trades_status ON paper_trades_v2(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_p2_trades_market ON paper_trades_v2(market_id)")
 
     log.info("phase2_tables_bootstrapped")
 

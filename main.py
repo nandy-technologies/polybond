@@ -285,8 +285,10 @@ async def process_resolutions() -> None:
                 won = (pos_outcome == market_outcome)
                 actual = 1.0 if won else 0.0
                 size = (shares or 0.0) * (avg_price or 0.0)
+                # Use size=1.0 as floor so trades with missing size data still update alpha
+                effective_size = max(size, 1.0)
                 await process_resolved_bet(wallet, market_id, won)
-                await update_wallet_alpha(wallet, market_id, avg_price or 0.0, actual, size)
+                await update_wallet_alpha(wallet, market_id, avg_price or 0.0, actual, effective_size)
             except Exception as exc:
                 log.warning("resolution_wallet_error", wallet=wallet, market=market_id, error=str(exc))
         await asyncio.to_thread(execute, "UPDATE markets SET processed_at = current_timestamp WHERE id = ?", [market_id])
@@ -299,7 +301,6 @@ async def on_large_trade(trade: dict) -> None:
     """Called when CLOB WS sees a large trade. Phase 2: score + paper trade + alert."""
     from discovery.watchlist import add_wallet
     from alerts.notifier import alert_on_trade, alert_on_signal
-    from scoring.kelly import log_paper_trade
     from dashboard.server import _broadcast_trade, broadcast_signal
     from storage import cache as c
 
@@ -383,16 +384,9 @@ async def on_large_trade(trade: dict) -> None:
         except Exception as exc:
             log.warning("phase2_signal_error", error=str(exc))
 
-    # Phase 1 Kelly paper trade logger (keep for backward compat)
-    if 0.01 < price < 0.99:
-        win_prob = price  # use market-implied probability directly
-        try:
-            await log_paper_trade(
-                wallet=wallet, market_id=market_id,
-                side=side, price=price, win_prob=win_prob,
-            )
-        except Exception as exc:
-            log.warning("paper_trade_error", error=str(exc))
+    # Phase 1 legacy log_paper_trade removed — Phase 2 paper_trades_v2 is the
+    # authoritative paper trading system. Keeping both caused double-logging
+    # with inconsistent sizing logic.
 
 
 async def on_x_wallet(wallet: str) -> None:

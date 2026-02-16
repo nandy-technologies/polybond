@@ -35,6 +35,12 @@ def get_conn() -> duckdb.DuckDBPyConnection:
 
 def bootstrap() -> None:
     """Create all tables if they don't exist."""
+    with _db_lock:
+        _bootstrap_impl()
+
+
+def _bootstrap_impl() -> None:
+    """Internal: runs under _db_lock."""
     conn = get_conn()
 
     conn.execute("""
@@ -145,6 +151,7 @@ def bootstrap() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_wallet ON trades(wallet)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_market ON trades(market_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_source ON trades(source)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_wallets_elo ON wallets(elo)")
 
     # Migrations for existing databases

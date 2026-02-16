@@ -29,9 +29,12 @@ _signal_lock = asyncio.Lock()
 
 
 def _broadcast_trade(trade: dict) -> None:
-    """Push a trade event to all SSE subscribers."""
+    """Push a trade event to all SSE subscribers.
+
+    Iterates a snapshot (list copy) to avoid mutation during iteration.
+    """
     dead = []
-    for q in _sse_subscribers:
+    for q in list(_sse_subscribers):
         try:
             q.put_nowait(trade)
         except asyncio.QueueFull:
@@ -44,9 +47,12 @@ def _broadcast_trade(trade: dict) -> None:
 
 
 def broadcast_signal(signal_data: dict) -> None:
-    """Push a signal event to signal SSE subscribers."""
+    """Push a signal event to signal SSE subscribers.
+
+    Iterates a snapshot (list copy) to avoid mutation during iteration.
+    """
     dead = []
-    for q in _signal_subscribers:
+    for q in list(_signal_subscribers):
         try:
             q.put_nowait(signal_data)
         except asyncio.QueueFull:

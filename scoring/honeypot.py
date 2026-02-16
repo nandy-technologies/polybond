@@ -428,9 +428,15 @@ def _build_resolved_list(
 ) -> list[dict]:
     """Build a synthetic list of trades with ``won`` annotations.
 
-    We don't have per-trade win/loss in the trades table, so we
-    distribute wins evenly across trades (round-robin) to avoid
-    artificially creating long win streaks.
+    We don't have per-trade win/loss in the trades table, so we assign
+    wins front-loaded (oldest trades first). This is a conservative
+    heuristic: if a wallet genuinely went on a win streak, the most
+    recent trades are the ones that matter for detection.
+
+    The previous approach (evenly distributing wins by stride) was
+    counterproductive — it *prevented* streak detection by design.
+    Front-loading wins means a wallet with 18W/2L will show 18 wins
+    then 2 losses, and the streak detector will correctly flag this.
     """
     total = wins + losses
     if total == 0:
@@ -440,29 +446,13 @@ def _build_resolved_list(
     resolved = trades[:total] if len(trades) >= total else trades[:]
     result: list[dict] = []
 
-    # Distribute wins evenly: every (total/wins)-th trade is a win
-    # This avoids the previous bug of front-loading all wins (which
-    # always created the maximum possible win streak).
-    if wins == 0:
-        for t in resolved:
-            t_copy = dict(t)
-            t_copy["won"] = False
-            result.append(t_copy)
-    elif wins >= len(resolved):
-        for t in resolved:
-            t_copy = dict(t)
-            t_copy["won"] = True
-            result.append(t_copy)
-    else:
-        # Spread wins evenly using stride
-        win_indices = set()
-        stride = len(resolved) / wins
-        for i in range(wins):
-            win_indices.add(int(i * stride))
-        for i, t in enumerate(resolved):
-            t_copy = dict(t)
-            t_copy["won"] = i in win_indices
-            result.append(t_copy)
+    # Front-load wins: first N trades are wins, rest are losses.
+    # This is the WORST CASE for streak detection (maximum streak),
+    # which is what we want — we'd rather flag and investigate than miss.
+    for i, t in enumerate(resolved):
+        t_copy = dict(t)
+        t_copy["won"] = i < wins
+        result.append(t_copy)
 
     return result
 

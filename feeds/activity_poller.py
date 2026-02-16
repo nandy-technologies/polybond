@@ -24,6 +24,7 @@ _last_poll_ts: float = 0.0
 _markets_polled: set[str] = set()
 _trade_callback = None  # Callback to trigger signal generation
 _processed_trade_ids: set[str] = set()  # Deduplication set
+_MAX_PROCESSED_IDS: int = 50_000  # Cap to prevent unbounded memory growth
 
 
 async def poll_top_markets(limit: int = 50, lookback_minutes: int = 5) -> int:
@@ -146,7 +147,7 @@ async def poll_top_markets(limit: int = 50, lookback_minutes: int = 5) -> int:
                         
                         # Trigger signal generation if trade is large enough
                         usd_value = trade.get("usd_value", 0)
-                        if _trade_callback and usd_value >= 1000:  # config.LARGE_TRADE_THRESHOLD
+                        if _trade_callback and usd_value >= config.LARGE_TRADE_THRESHOLD:
                             try:
                                 await _trade_callback(trade)
                             except Exception as callback_exc:
@@ -166,6 +167,15 @@ async def poll_top_markets(limit: int = 50, lookback_minutes: int = 5) -> int:
     for result in results:
         if isinstance(result, int):
             total_new_trades += result
+
+    # Evict oldest entries if dedup set exceeds cap (prevent memory leak)
+    if len(_processed_trade_ids) > _MAX_PROCESSED_IDS:
+        # Clear half the set — we rely on DB ON CONFLICT for true dedup
+        excess = len(_processed_trade_ids) - _MAX_PROCESSED_IDS // 2
+        to_remove = list(_processed_trade_ids)[:excess]
+        for tid in to_remove:
+            _processed_trade_ids.discard(tid)
+        log.info("dedup_set_trimmed", removed=len(to_remove), remaining=len(_processed_trade_ids))
 
     log.info(
         "activity_poll_complete",

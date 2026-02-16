@@ -139,7 +139,7 @@ _DASHBOARD_HTML = """\
     .tab-content.active { display: block; }
 
     .grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 16px;
     }
     .panel {
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
@@ -197,8 +197,22 @@ _DASHBOARD_HTML = """\
     .stat-card.accent-gold .value { color: var(--accent); }
     .stat-card.accent-green .value { color: var(--green); }
     .stat-card.accent-red .value { color: var(--red); }
-    .empty-state { color: var(--text-muted); text-align: center; padding: 24px; font-style: italic; }
+    .empty-state { color: var(--text-muted); text-align: center; padding: 32px 16px; font-style: italic; font-size: 13px; }
+    .empty-state .empty-hint { display: block; margin-top: 8px; font-size: 11px; color: #555; font-style: normal; }
     .timestamp { color: var(--text-muted); font-size: 11px; }
+    /* Balance toggle */
+    .bal-toggle { display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:12px;color:var(--text-muted) }
+    .bal-toggle input { display:none }
+    .bal-switch { width:32px;height:18px;background:#333;border-radius:9px;position:relative;transition:background .2s }
+    .bal-switch::after { content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;background:#666;border-radius:50%;transition:transform .2s,background .2s }
+    .bal-toggle input:checked+.bal-switch { background:rgba(201,169,110,0.3) }
+    .bal-toggle input:checked+.bal-switch::after { transform:translateX(14px);background:var(--accent) }
+    .bal-hidden .bal-val { visibility:hidden !important }
+    .bal-hidden .bal-mask { display:inline !important }
+    .bal-mask { display:none;color:var(--text-muted);letter-spacing:1px }
+    .bal-chart-wrap { position:relative }
+    .bal-chart-mask { display:none;position:absolute;inset:0;background:var(--bg);z-index:2;align-items:center;justify-content:center;color:#444;font-size:13px;font-style:italic;border-radius:6px }
+    .bal-hidden .bal-chart-mask { display:flex }
     .pnl-positive { color: var(--green); }
     .pnl-negative { color: var(--red); }
     .pnl-neutral { color: var(--text-muted); }
@@ -227,24 +241,39 @@ _DASHBOARD_HTML = """\
       .grid { grid-template-columns: 1fr; }
       .panel-wide { grid-column: span 1; }
       .stat-grid, .stat-grid-3 { grid-template-columns: repeat(2, 1fr); }
-      /* Hide Funding and Bot% columns on mobile */
       th:nth-child(7), td:nth-child(7), th:nth-child(8), td:nth-child(8) { display: none; }
       table { font-size: 0.8rem; }
       td, th { padding: 0.4rem; }
     }
-    @media (max-width: 430px) {
-      body { padding: 10px; font-size: 13px; }
+    @media (max-width: 768px) {
+      body { padding: 12px; padding-top: 48px; }
       header { padding: 12px 16px; flex-direction: column; gap: 8px; align-items: flex-start; }
-      header h1 { font-size: 18px; }
-      .header-right { width: 100%; justify-content: space-between; }
-      .tab-btn { padding: 8px 14px; font-size: 11px; }
-      .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-      .stat-card .value { font-size: 1.2rem; }
-      .panel { padding: 12px; border-radius: 8px; }
-      .chart-container { height: 200px; }
-      td { font-size: 0.75rem; }
-      /* Hide more columns on very small screens */
+      .header-right { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+      .tab-btn { padding: 8px 16px; font-size: 11px; }
+      .readiness-row { flex-wrap: wrap; gap: 6px; }
+      .readiness-label { width: 120px; font-size: 11px; }
+      .readiness-value { width: 60px; font-size: 12px; }
+      .readiness-target { width: 60px; font-size: 10px; }
+    }
+    @media (max-width: 430px) {
+      body { padding: 8px; padding-top: 44px; font-size: 13px; }
+      header { padding: 10px 12px; }
+      header h1 { font-size: 16px; }
+      .tab-btn { padding: 8px 12px; font-size: 10px; letter-spacing: 0.08em; }
+      .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+      .stat-card { padding: 10px 8px; }
+      .stat-card .value { font-size: 1.1rem; }
+      .stat-card .label { font-size: 0.6rem; }
+      .panel { padding: 10px; border-radius: 8px; }
+      .panel h2 { font-size: 1.05rem; }
+      .chart-container { height: 180px; }
+      td { font-size: 0.72rem; }
+      th { font-size: 0.65rem; }
       th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { display: none; }
+      #live-feed, #signal-feed { max-height: 260px; }
+      .feed-item { font-size: 11px; padding: 5px 8px; }
+      .bal-toggle span:last-child { display: none; }
+      footer { flex-wrap: wrap; font-size: 10px; gap: 8px; }
     }
     /* ─── Readiness Scorecard ─── */
     .readiness-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
@@ -267,14 +296,14 @@ _DASHBOARD_HTML = """\
     @media(max-width:500px){ #nandy-nav{overflow-x:auto;-webkit-overflow-scrolling:touch} #nandy-nav a.nn-link{white-space:nowrap;padding:0 10px;font-size:.65rem} #nandy-nav .nn-dropdown-toggle{white-space:nowrap;padding:0 10px;font-size:.65rem}}
   </style>
 </head>
-<body>
-<nav id="nandy-nav"><a class="nn-brand" href="/"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAErElEQVR4nO1Xe0xbVRi/595b2t4+QN5LDIyHg1yYIujwH0WSuTEWl6m7kDFnnSOwgUAUAlocl1IYCJvANl66oE0YMa0sLtkjAhvb2GBD4ma2EhMgC/IQsKUw1lJK773mVGrAOIQ2wxj9/XHOd06/x+983/nOTRHkf/xLAeBA56T50tmHvJfurRWoI0ZqikIpisK83aXP+vi6hnMcjcK9dSFA0zQauHUrqtFoGIHULZIBRCQAChYhSQz+hjwpUBSFcUvSLM9N336uuXao9VvVgzOqmpglqmAtRMDfKUBnhYWFHACAg+uyYvkO3GpKnn9kELm6uYE587zRZDIzm0JCxAjGr9yb/GGr3Q7OCoWCdYgARVEYSZKc3YE8U/YWxzL7cR6P85S63FuYNzVtDIkoFUtcMZ1ed+QpKREzMPAgjkV5oxjOb8rMU3ZCO47jMDgBAP6SCP7nDbWawigtyQGFgoHrhpqSGDLA/6Ouzmtegz8P5433ft/zQnx8wcIC22zQ/SpiLGZ0amLy8/FRpiqn6NSu8vyMbUGkf/WtjnOzXb0/KAAAV1bKCHhcBmpK815/ZJxJ8/D0miGEwsqkVPltTWPFmyajKW9keOhufnljdrXyg1yG5cwldNXJknJ5Y0DgRj+A8Qu2vfFO61lVza772ntpoWS4IX7PvlKx2P3HFUvAcRyUQV21Mj44wD/bajYi1zsuHy+rbzlfqciK9vPzK7KY51jPDYHyzS9FjzXXVR+QSkSpAkKIDQ3/0rLlxdeKBRJm8/Bg//sTE7o5QuiiSs0ta79+4cxpoUiS2NXV3ca64A3Ts+jlwsJCxn6nUHt64EbGu0mbTNP6I6NDg83xiWmxz215ZarjfNN3gUFBiv6f7iv3Hv5kR1vbxYg7ne3dHl4++u7bvSc6Ojor+Xz+gFDCXdBNTPokHZLv6bnZdVIk5B9tri/tuXGlraGhShllMExpdGNjSdMTA0Ewlr0kYGk6ZLIYgUp1zQzl9P27PZ4JDf5SKpV+/V5GQXP7pZZIiRD/7Gbn1Zmph4ac4oqv+o8VpGexVgbkHq2v+uI4HYzz8XK9foaLi9upDI+OvVv7qTzZbLHs7LaKEjUKhQVBEEwmi+HZYzz2DsCLqNEgCHxs4DpNRvlGRpA3XN09cilZ5lm7zp2reDLB5yMhI8bTCYu6dccK9mE4VvzNxUtRra23pmwZpiiXPgRh7P5WDZqmURiITkkhtr8cusEemKYpFygXZR9IOaHMSl3UdVGr1bDlkN2xUUHZ2W+L4BqAZWd06HvxB+wBIAk4l32cerAi//DBpXtrfY7R1SpCxwkJCYsppGyjSEKwcxbLslPBPl8LCXS1issfEI1tNBvnrIBluZV1VwaOOACtdtJ2ag7hBAJCYEu9Vks6VF8ccQIGw0MUYKgVymFhfdy6Eejr87YFGxmfnCbEhK2MsG0dAYo4ATFBiHmIrQIOA3XEiCR/r/fzEeECP7+neVCmqHUkYIfVasH4PMzdmUuIIk7AbDQJUIS1EXAUqFPGOA9nEdTW86866AN3hoDFumAd100boVzbt45tGLYYTK+bHbfOM/Az+8+ApmmUe5L/BZD/An4DmrH2f7rXvCEAAAAASUVORK5CYII=" alt="N" style="height:22px;width:auto;vertical-align:middle"></a><script>(function(){var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;var n=document.getElementById('nandy-nav'),ls=[['HYPE Bot',8082],['Polymarket',8083],['Universe',9090]];ls.forEach(function(d){var a=document.createElement('a');a.className='nn-link';a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];if(location.port==d[1])a.classList.add('nn-active');n.appendChild(a)});var dd=document.createElement('div');dd.className='nn-dropdown';var games=[['Tide Pools',8084]];var isGA=games.some(function(g){return location.port==g[1]});var tog=document.createElement('button');tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';dd.appendChild(tog);var mn=document.createElement('div');mn.className='nn-dropdown-menu';games.forEach(function(g){var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a)});dd.appendChild(mn);n.appendChild(dd);tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});document.addEventListener('click',function(){dd.classList.remove('open')})})();</script></nav>
+<body class="bal-hidden">
+<nav id="nandy-nav"><a class="nn-brand" href="/"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAErElEQVR4nO1Xe0xbVRi/595b2t4+QN5LDIyHg1yYIujwH0WSuTEWl6m7kDFnnSOwgUAUAlocl1IYCJvANl66oE0YMa0sLtkjAhvb2GBD4ma2EhMgC/IQsKUw1lJK773mVGrAOIQ2wxj9/XHOd06/x+983/nOTRHkf/xLAeBA56T50tmHvJfurRWoI0ZqikIpisK83aXP+vi6hnMcjcK9dSFA0zQauHUrqtFoGIHULZIBRCQAChYhSQz+hjwpUBSFcUvSLM9N336uuXao9VvVgzOqmpglqmAtRMDfKUBnhYWFHACAg+uyYvkO3GpKnn9kELm6uYE587zRZDIzm0JCxAjGr9yb/GGr3Q7OCoWCdYgARVEYSZKc3YE8U/YWxzL7cR6P85S63FuYNzVtDIkoFUtcMZ1ed+QpKREzMPAgjkV5oxjOb8rMU3ZCO47jMDgBAP6SCP7nDbWawigtyQGFgoHrhpqSGDLA/6Ouzmtegz8P5433ft/zQnx8wcIC22zQ/SpiLGZ0amLy8/FRpiqn6NSu8vyMbUGkf/WtjnOzXb0/KAAAV1bKCHhcBmpK815/ZJxJ8/D0miGEwsqkVPltTWPFmyajKW9keOhufnljdrXyg1yG5cwldNXJknJ5Y0DgRj+A8Qu2vfFO61lVza772ntpoWS4IX7PvlKx2P3HFUvAcRyUQV21Mj44wD/bajYi1zsuHy+rbzlfqciK9vPzK7KY51jPDYHyzS9FjzXXVR+QSkSpAkKIDQ3/0rLlxdeKBRJm8/Bg//sTE7o5QuiiSs0ta79+4cxpoUiS2NXV3ca64A3Ts+jlwsJCxn6nUHt64EbGu0mbTNP6I6NDg83xiWmxz215ZarjfNN3gUFBiv6f7iv3Hv5kR1vbxYg7ne3dHl4++u7bvSc6Ojor+Xz+gFDCXdBNTPokHZLv6bnZdVIk5B9tri/tuXGlraGhShllMExpdGNjSdMTA0Ewlr0kYGk6ZLIYgUp1zQzl9P27PZ4JDf5SKpV+/V5GQXP7pZZIiRD/7Gbn1Zmph4ac4oqv+o8VpGexVgbkHq2v+uI4HYzz8XK9foaLi9upDI+OvVv7qTzZbLHs7LaKEjUKhQVBEEwmi+HZYzz2DsCLqNEgCHxs4DpNRvlGRpA3XN09cilZ5lm7zp2reDLB5yMhI8bTCYu6dccK9mE4VvzNxUtRra23pmwZpiiXPgRh7P5WDZqmURiITkkhtr8cusEemKYpFygXZR9IOaHMSl3UdVGr1bDlkN2xUUHZ2W+L4BqAZWd06HvxB+wBIAk4l32cerAi//DBpXtrfY7R1SpCxwkJCYsppGyjSEKwcxbLslPBPl8LCXS1issfEI1tNBvnrIBluZV1VwaOOACtdtJ2ag7hBAJCYEu9Vks6VF8ccQIGw0MUYKgVymFhfdy6Eejr87YFGxmfnCbEhK2MsG0dAYo4ATFBiHmIrQIOA3XEiCR/r/fzEeECP7+neVCmqHUkYIfVasH4PMzdmUuIIk7AbDQJUIS1EXAUqFPGOA9nEdTW86866AN3hoDFumAd100boVzbt45tGLYYTK+bHbfOM/Az+8+ApmmUe5L/BZD/An4DmrH2f7rXvCEAAAAASUVORK5CYII=" alt="N" style="height:22px;width:auto;vertical-align:middle"></a><script>(function(){var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;var n=document.getElementById('nandy-nav'),ls=[['HYPE Bot',8082],['Polymarket',8083]];ls.forEach(function(d){var a=document.createElement('a');a.className='nn-link';a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];if(location.port==d[1])a.classList.add('nn-active');n.appendChild(a)});var dd=document.createElement('div');dd.className='nn-dropdown';var games=[['Tide Pools',8084]];var isGA=games.some(function(g){return location.port==g[1]});var tog=document.createElement('button');tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';dd.appendChild(tog);var mn=document.createElement('div');mn.className='nn-dropdown-menu';games.forEach(function(g){var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a)});dd.appendChild(mn);n.appendChild(dd);tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});document.addEventListener('click',function(){dd.classList.remove('open')})})();</script></nav>
   <header>
     <div class="header-left">
       <h1>Polymarket Copy-Trading Bot</h1>
-      <span style="font-size:12px; color:var(--text-muted);">Phase 2 &mdash; Paper Trading</span>
     </div>
     <div class="header-right">
+      <label class="bal-toggle" title="Show dollar amounts"><input type="checkbox" id="bal-cb"><span class="bal-switch"></span><span>Balances</span></label>
       <span class="uptime" id="uptime">{{ uptime }}</span>
       <span class="live-dot"></span>
       <span class="status-badge status-{{ overall_status }}">{{ overall_status }}</span>
@@ -308,7 +337,7 @@ _DASHBOARD_HTML = """\
           </div>
           {% endfor %}
         {% else %}
-          <div class="empty-state">No health checks registered</div>
+          <div class="empty-state">No health checks registered<span class="empty-hint">Health checks register automatically when feeds start.</span></div>
         {% endif %}
         <div class="stat-grid" style="margin-top: 12px;">
           <div class="stat-card accent-gold"><div class="value">{{ wallet_count }}</div><div class="label">Wallets</div></div>
@@ -345,7 +374,7 @@ _DASHBOARD_HTML = """\
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No wallets tracked yet</div>{% endif %}
+        {% else %}<div class="empty-state">No wallets tracked yet<span class="empty-hint">Wallets are added automatically via the activity poller and discovery scanner.</span></div>{% endif %}
       </div>
 
       <div class="panel panel-wide">
@@ -366,7 +395,7 @@ _DASHBOARD_HTML = """\
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No large trades recorded yet</div>{% endif %}
+        {% else %}<div class="empty-state">No large trades recorded yet<span class="empty-hint">Trades appear once the activity poller detects transactions above the threshold.</span></div>{% endif %}
       </div>
 
       <div class="panel">
@@ -380,17 +409,17 @@ _DASHBOARD_HTML = """\
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No coordinated clusters detected</div>{% endif %}
+        {% else %}<div class="empty-state">No coordinated clusters detected<span class="empty-hint">Cluster analysis runs every 30 minutes across tracked wallets.</span></div>{% endif %}
       </div>
 
       <div class="panel">
         <h2>Quick P&amp;L <span class="badge">{{ paper_stats.total }} trades</span></h2>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</div>
+            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}"><span class="bal-val">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</span><span class="bal-mask">***</span></div>
             <div class="label">Return</div>
           </div>
-          <div class="stat-card"><div class="value">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</div><div class="label">Win Rate</div></div>
+          <div class="stat-card"><div class="value"><span class="bal-val">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</span><span class="bal-mask">***</span></div><div class="label">Win Rate</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.open }}</div><div class="label">Open</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.sharpe }}</div><div class="label">Sharpe</div></div>
         </div>
@@ -403,25 +432,25 @@ _DASHBOARD_HTML = """\
     <div class="grid">
       <div class="panel panel-wide">
         <h2>Equity Curve</h2>
-        <div class="chart-container"><canvas id="equity-chart"></canvas></div>
+        <div class="chart-container bal-chart-wrap"><canvas id="equity-chart"></canvas><div class="bal-chart-mask">Enable balances to view</div></div>
       </div>
 
       <div class="panel panel-wide">
         <h2>Performance Stats</h2>
         <div class="stat-grid">
           <div class="stat-card">
-            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</div>
+            <div class="value {% if paper_stats.equity > 1000 %}pnl-positive{% elif paper_stats.equity < 1000 %}pnl-negative{% endif %}"><span class="bal-val">{{ "{:+.1f}".format((paper_stats.equity / 1000 - 1) * 100) }}%</span><span class="bal-mask">***</span></div>
             <div class="label">Return</div>
           </div>
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl > 0 else 'pnl-negative' }}">{{ "{:+.1f}".format(paper_stats.realized_pnl / 1000 * 100) }}%</div>
+            <div class="value {{ 'pnl-positive' if paper_stats.realized_pnl > 0 else 'pnl-negative' }}"><span class="bal-val">{{ "{:+.1f}".format(paper_stats.realized_pnl / 1000 * 100) }}%</span><span class="bal-mask">***</span></div>
             <div class="label">Realized P&amp;L</div>
           </div>
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if paper_stats.unrealized_pnl > 0 else 'pnl-negative' }}">{{ "{:+.1f}".format(paper_stats.unrealized_pnl / 1000 * 100) }}%</div>
+            <div class="value {{ 'pnl-positive' if paper_stats.unrealized_pnl > 0 else 'pnl-negative' }}"><span class="bal-val">{{ "{:+.1f}".format(paper_stats.unrealized_pnl / 1000 * 100) }}%</span><span class="bal-mask">***</span></div>
             <div class="label">Unrealized</div>
           </div>
-          <div class="stat-card"><div class="value">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</div><div class="label">Win Rate</div></div>
+          <div class="stat-card"><div class="value"><span class="bal-val">{{ "%.0f"|format(paper_stats.win_rate * 100) }}%</span><span class="bal-mask">***</span></div><div class="label">Win Rate</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.profit_factor }}</div><div class="label">Profit Factor</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.sharpe }}</div><div class="label">Sharpe</div></div>
           <div class="stat-card"><div class="value">{{ paper_stats.total }}</div><div class="label">Total Trades</div></div>
@@ -441,13 +470,13 @@ _DASHBOARD_HTML = """\
               <td class="side-{{ p.direction|lower }}">{{ p.direction }}</td>
               <td class="num">{{ "%.3f"|format(p.entry_price) }}</td>
               <td class="num">{{ "%.3f"|format(p.current_price) }}</td>
-              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}">{{ "{:+.1f}".format(p.pnl_pct) }}%</td>
+              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}"><span class="bal-val">{{ "{:+.1f}".format(p.pnl_pct) }}%</span><span class="bal-mask">***</span></td>
               <td class="timestamp">{{ p.age }}</td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No open positions</div>{% endif %}
+        {% else %}<div class="empty-state">No open positions<span class="empty-hint">Paper trades open when medium or high-tier signals are detected.</span></div>{% endif %}
       </div>
 
       <div class="panel panel-wide">
@@ -462,13 +491,13 @@ _DASHBOARD_HTML = """\
               <td class="side-{{ p.direction|lower }}">{{ p.direction }}</td>
               <td class="num">{{ "%.3f"|format(p.entry_price) }}</td>
               <td class="num">{{ "%.3f"|format(p.current_price) }}</td>
-              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}">{{ "{:+.1f}".format(p.pnl_pct) }}%</td>
+              <td class="num {{ 'pnl-positive' if p.pnl_pct > 0 else 'pnl-negative' if p.pnl_pct < 0 else 'pnl-neutral' }}"><span class="bal-val">{{ "{:+.1f}".format(p.pnl_pct) }}%</span><span class="bal-mask">***</span></td>
               <td class="timestamp">{{ p.close_reason or '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No closed positions yet</div>{% endif %}
+        {% else %}<div class="empty-state">No closed positions yet<span class="empty-hint">Positions close on stop-loss, take-profit, max hold, or market resolution.</span></div>{% endif %}
       </div>
 
       {% if tuning_results %}
@@ -534,7 +563,7 @@ _DASHBOARD_HTML = """\
             {% endfor %}
           </tbody>
         </table>
-        {% else %}<div class="empty-state">No signals generated yet</div>{% endif %}
+        {% else %}<div class="empty-state">No signals generated yet<span class="empty-hint">Signals are scored from wallet Elo, alpha, Kelly fraction, and funding analysis.</span></div>{% endif %}
       </div>
     </div>
   </div>
@@ -553,7 +582,7 @@ _DASHBOARD_HTML = """\
           <div class="stat-card"><div class="value">{{ latency_stats.min }}ms</div><div class="label">Min</div></div>
           <div class="stat-card"><div class="value">{{ latency_stats.max }}ms</div><div class="label">Max</div></div>
           <div class="stat-card">
-            <div class="value {{ 'pnl-positive' if latency_stats.avg < 2000 else 'pnl-negative' }}">{{ '✓' if latency_stats.avg < 2000 else '✗' }}</div>
+            <div class="value {{ 'pnl-positive' if latency_stats.avg < 2000 else 'pnl-negative' }}">{{ 'PASS' if latency_stats.avg < 2000 else 'FAIL' }}</div>
             <div class="label">&lt; 2s Target</div>
           </div>
         </div>
@@ -583,6 +612,17 @@ _DASHBOARD_HTML = """\
   </footer>
 
   <script>
+    // Balance toggle — hidden by default
+    (function(){
+      var cb=document.getElementById('bal-cb');
+      var saved=localStorage.getItem('pm-show-bal');
+      if(saved==='1'){cb.checked=true;document.body.classList.remove('bal-hidden');}
+      cb.addEventListener('change',function(){
+        document.body.classList.toggle('bal-hidden',!cb.checked);
+        localStorage.setItem('pm-show-bal',cb.checked?'1':'0');
+      });
+    })();
+
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -842,7 +882,7 @@ _DASHBOARD_HTML = """\
         var met = d.met || 0;
         badge.textContent = met + '/7 criteria met';
         if (met === 7) {
-          status.innerHTML = '<span class="readiness-ready">READY FOR PHASE 3 🚀</span>';
+          status.innerHTML = '<span class="readiness-ready">READY FOR PHASE 3</span>';
         } else if (met < 4) {
           status.innerHTML = '<span style="color:var(--text-muted)">COLLECTING DATA...</span>';
         } else {
@@ -859,7 +899,7 @@ _DASHBOARD_HTML = """\
             '<div class="readiness-value">' + (v.display || '—') + '</div>' +
             '<div class="readiness-target">' + c.target + '</div>' +
             '<div class="readiness-bar-bg"><div class="readiness-bar-fill" style="width:0%"></div></div>' +
-            '<div class="readiness-icon">' + (ok ? '✅' : '⬜') + '</div>';
+            '<div class="readiness-icon">' + (ok ? '<span style="color:var(--green)">&#x2713;</span>' : '<span style="color:#444">&#x2015;</span>') + '</div>';
           rows.appendChild(row);
           // Animate bar
           setTimeout(function() {

@@ -32,6 +32,8 @@ async def scan_large_trades(min_usd: float | None = None) -> list[str]:
         SELECT DISTINCT wallet
         FROM trades
         WHERE usd_value >= ?
+          AND wallet != ''
+          AND wallet IS NOT NULL
         ORDER BY wallet
         """,
         [threshold],
@@ -120,6 +122,7 @@ async def scan_new_whales() -> list[str]:
                 ts,
                 ROW_NUMBER() OVER (PARTITION BY wallet ORDER BY ts ASC) AS rn
             FROM trades
+            WHERE wallet != '' AND wallet IS NOT NULL
         )
         SELECT DISTINCT wallet
         FROM first_trades
@@ -219,6 +222,19 @@ async def run_discovery_loop(interval: int = 300) -> None:
                 except Exception as exc:
                     log.warning(
                         "funding_analysis_error",
+                        wallet=addr,
+                        error=str(exc),
+                    )
+
+                # Bot detection (best-effort)
+                try:
+                    from scoring.bot_detection import analyze_wallet_bot_probability
+                    await analyze_wallet_bot_probability(addr)
+                except ImportError:
+                    log.debug("bot_detection_module_not_available")
+                except Exception as exc:
+                    log.warning(
+                        "bot_detection_error",
                         wallet=addr,
                         error=str(exc),
                     )

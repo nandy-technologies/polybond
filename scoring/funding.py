@@ -18,6 +18,7 @@ should be extended to inspect actual transaction histories.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import config
@@ -171,7 +172,8 @@ async def analyze_wallet_funding(address: str) -> dict:
     Returns a dict with keys: address, funding_type, suspicious, details.
     """
     # Check if we already have a classification
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         "SELECT funding_type, first_seen FROM wallets WHERE address = ?",
         [address],
     )
@@ -202,12 +204,14 @@ async def analyze_wallet_funding(address: str) -> dict:
 
     # Persist
     try:
-        execute(
+        await asyncio.to_thread(
+            execute,
             "UPDATE wallets SET funding_type = ? WHERE address = ?",
             [funding_type, address],
         )
         if suspicious:
-            execute(
+            await asyncio.to_thread(
+                execute,
                 "UPDATE wallets SET flagged = true, flag_reason = ? WHERE address = ?",
                 [f"suspicious_funding:{funding_type}", address],
             )
@@ -269,7 +273,8 @@ async def _classify_from_behaviour(address: str) -> str:
         it may be a bot funded through a bridge (``'bridge'``).
       - Otherwise, ``'unknown'``.
     """
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         "SELECT price, size, usd_value, ts FROM trades "
         "WHERE wallet = ? ORDER BY ts ASC LIMIT 20",
         [address],

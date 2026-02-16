@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -25,8 +26,8 @@ _subscribed_markets: set[str] = set()
 _last_message_ts: float = 0.0
 _reconnect_attempts: int = 0
 
-# Orderbook snapshots per market
-_orderbooks: dict[str, dict] = {}
+# Orderbook snapshots per market (LRU via OrderedDict)
+_orderbooks: OrderedDict[str, dict] = OrderedDict()
 
 # Callback for orderbook updates
 _on_orderbook_cb: Callable | None = None
@@ -89,7 +90,19 @@ def _parse_fill(raw: dict) -> dict | None:
             ts = datetime.now(timezone.utc)
 
         tx_hash = raw.get("transaction_hash", "")
-        trade_id = tx_hash if tx_hash else str(uuid.uuid4())
+        # Dedup key: use tx_hash when available so the DB's
+        # ON CONFLICT DO NOTHING catches the same trade reported from
+        # both sides (buyer/seller) of a binary market.
+        # When tx_hash is missing, derive a deterministic ID from the
+        # event fields — includes asset_id so each token side gets its
+        # own row, but at least prevents literal duplicate messages from
+        # being double-counted.
+        if tx_hash:
+            trade_id = tx_hash
+        else:
+            import hashlib
+            dedup_payload = f"{raw.get('market','')}-{raw.get('asset_id','')}-{price_raw}-{size_raw}-{ts_raw}"
+            trade_id = hashlib.sha256(dedup_payload.encode()).hexdigest()[:32]
 
         return {
             "id": trade_id,
@@ -115,8 +128,9 @@ async def _store_fill(fill: dict) -> None:
         await asyncio.to_thread(
             execute,
             """
-            INSERT OR IGNORE INTO trades (id, wallet, market_id, side, price, size, usd_value, ts, source)
+            INSERT INTO trades (id, wallet, market_id, side, price, size, usd_value, ts, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'clob_ws')
+            ON CONFLICT DO NOTHING
             """,
             [
                 fill["id"],
@@ -135,9 +149,10 @@ async def _store_fill(fill: dict) -> None:
     try:
         # Serialise for Redis (convert datetime to ISO string)
         trade_for_cache = {**fill, "ts": fill["ts"].isoformat()}
-        await cache.push_recent_trade(fill["wallet"], trade_for_cache)
+        if fill["wallet"]:
+            await cache.push_recent_trade(fill["wallet"], trade_for_cache)
         # Also push for maker if different
-        if fill["maker"] and fill["maker"] != fill["wallet"]:
+        if fill.get("maker") and fill["maker"] != fill.get("wallet", ""):
             await cache.push_recent_trade(fill["maker"], trade_for_cache)
     except Exception as exc:
         log.warning("cache_push_error", error=str(exc), fill_id=fill["id"])
@@ -317,7 +332,12 @@ async def run(
                         # Try orderbook first
                         ob = _parse_orderbook(event)
                         if ob is not None:
+                            # Move to end for LRU ordering
                             _orderbooks[ob["market_id"]] = ob
+                            _orderbooks.move_to_end(ob["market_id"])
+                            # Cap orderbook cache — evict oldest (front of OrderedDict)
+                            while len(_orderbooks) > 500:
+                                _orderbooks.popitem(last=False)
                             if on_orderbook is not None:
                                 try:
                                     result = on_orderbook(ob)

@@ -1,4 +1,8 @@
-"""DuckDB wrapper — schema bootstrap and query helpers."""
+"""DuckDB wrapper — schema bootstrap and query helpers.
+
+Uses a single shared connection protected by a global lock.
+DuckDB connections are NOT thread-safe, so all access is serialized.
+"""
 
 from __future__ import annotations
 
@@ -12,20 +16,21 @@ from utils.logger import get_logger
 
 log = get_logger("duckdb")
 
-_local = threading.local()
+_db_lock = threading.Lock()
+_conn: duckdb.DuckDBPyConnection | None = None
 
 
 def _ensure_dir() -> None:
     Path(config.DUCKDB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
-_db_lock = threading.Lock()
 
 def get_conn() -> duckdb.DuckDBPyConnection:
-    """Return a thread-local DuckDB connection."""
-    if not hasattr(_local, "conn") or _local.conn is None:
+    """Return the single shared DuckDB connection (must be called under _db_lock)."""
+    global _conn
+    if _conn is None:
         _ensure_dir()
-        _local.conn = duckdb.connect(config.DUCKDB_PATH)
-    return _local.conn
+        _conn = duckdb.connect(config.DUCKDB_PATH)
+    return _conn
 
 
 def bootstrap() -> None:
@@ -46,6 +51,7 @@ def bootstrap() -> None:
             cluster_id    INTEGER,
             flagged       BOOLEAN DEFAULT false,
             flag_reason   VARCHAR,
+            bot_probability DOUBLE DEFAULT 0.0,
             meta          VARCHAR            -- JSON blob for extras
         )
     """)
@@ -140,6 +146,12 @@ def bootstrap() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_market ON trades(market_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_wallets_elo ON wallets(elo)")
+
+    # Migrations for existing databases
+    try:
+        conn.execute("ALTER TABLE wallets ADD COLUMN bot_probability DOUBLE DEFAULT 0.0")
+    except duckdb.CatalogException:
+        pass  # column already exists
 
     log.info("schema_bootstrapped")
 

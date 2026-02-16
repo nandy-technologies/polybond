@@ -209,10 +209,12 @@ async def _store_tweets(tweets: list[dict], keyword: str) -> int:
     for t in tweets:
         try:
             wallets_json = orjson.dumps(t["wallets"]).decode()
-            execute(
+            await asyncio.to_thread(
+                execute,
                 """
-                INSERT OR IGNORE INTO x_tweets (tweet_id, author, text, wallet_mentions, keyword, ts, processed)
+                INSERT INTO x_tweets (tweet_id, author, text, wallet_mentions, keyword, ts, processed)
                 VALUES (?, ?, ?, ?, ?, ?, false)
+                ON CONFLICT DO NOTHING
                 """,
                 [
                     t["id"],
@@ -333,7 +335,7 @@ async def health_check() -> bool:
 
     try:
         session = await _get_session()
-        params = {"query": "polymarket", "max_results": "10"}
+        params = {"query": "polymarket", "max_results": "1"}
         async with session.get(_SEARCH_URL, params=params) as resp:
             # 200 = working, 401/403 = bad token
             return resp.status == 200

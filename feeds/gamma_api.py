@@ -202,7 +202,8 @@ async def fetch_all_markets(active: bool = True, page_size: int = 100) -> list[d
     """Paginate through ALL active markets.
 
     Makes sequential requests, each rate-limited, until an incomplete
-    page signals the end of results.
+    page signals the end of results.  Yields to the event loop every
+    10 pages so the dashboard and other tasks stay responsive.
 
     Returns
     -------
@@ -210,6 +211,7 @@ async def fetch_all_markets(active: bool = True, page_size: int = 100) -> list[d
     """
     all_markets: list[dict] = []
     offset = 0
+    pages = 0
 
     while True:
         page = await fetch_markets(limit=page_size, active=active, offset=offset)
@@ -217,6 +219,7 @@ async def fetch_all_markets(active: bool = True, page_size: int = 100) -> list[d
             break
 
         all_markets.extend(page)
+        pages += 1
         log.debug("fetch_all_markets_page", offset=offset, page_size=len(page), total=len(all_markets))
 
         if len(page) < page_size:
@@ -224,6 +227,11 @@ async def fetch_all_markets(active: bool = True, page_size: int = 100) -> list[d
             break
 
         offset += page_size
+
+        # Yield to the event loop every 10 pages so other tasks
+        # (dashboard, websocket, etc.) remain responsive.
+        if pages % 10 == 0:
+            await asyncio.sleep(0)
 
     log.info("fetch_all_markets_complete", total=len(all_markets))
     return all_markets
@@ -251,22 +259,32 @@ async def fetch_events(limit: int = 100) -> list[dict]:
     return records
 
 
-async def sync_markets() -> int:
-    """Fetch all active markets and upsert them into the DuckDB markets table.
+async def sync_top_markets(limit: int = 1000) -> int:
+    """Fetch only the top N markets by volume and upsert them into DuckDB.
+
+    This replaces the old sync_all_markets() which fetched 430k+ markets.
+    Now we only sync the most active/liquid markets that are actually relevant.
+
+    Parameters
+    ----------
+    limit:
+        Number of top markets to sync (default 1000).
 
     Returns
     -------
     int: number of markets upserted.
     """
-    markets = await fetch_all_markets(active=True)
+    # Fetch top markets ordered by volume
+    markets = await fetch_markets(limit=limit, active=True, offset=0)
     if not markets:
-        log.warning("sync_markets_empty")
+        log.warning("sync_top_markets_empty")
         return 0
 
     upserted = 0
     for m in markets:
         try:
-            execute(
+            await asyncio.to_thread(
+                execute,
                 """
                 INSERT INTO markets (id, condition_id, question, slug, active, volume, liquidity, end_date, outcome, resolved_at, meta)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -300,43 +318,85 @@ async def sync_markets() -> int:
         except Exception as exc:
             log.debug("sync_market_skip", market_id=m.get("id"), error=str(exc))
 
-    log.info("sync_markets_complete", total=len(markets), upserted=upserted)
+    log.info("sync_top_markets_complete", limit=limit, upserted=upserted)
     return upserted
 
 
-async def get_market(market_id: str) -> dict | None:
-    """Get a single market by ID, first checking local DB then falling back to the API.
+async def sync_markets() -> int:
+    """Legacy wrapper for sync_top_markets(). Now syncs only top 1000 markets.
+
+    DEPRECATED: Use sync_top_markets(limit=N) directly.
+    """
+    return await sync_top_markets(limit=1000)
+
+
+async def get_market(market_id: str, force_refresh: bool = False) -> dict | None:
+    """Get a single market by ID with Redis → DB → API fallback.
+
+    Uses a multi-layer cache:
+    1. Redis (1 hour TTL) — fastest
+    2. DuckDB — persistent but may be stale
+    3. Gamma API — authoritative but rate-limited
+
+    Parameters
+    ----------
+    market_id:
+        Market or condition ID.
+    force_refresh:
+        Skip caches and fetch fresh from API.
 
     Returns
     -------
     Normalised market dict, or None if not found.
     """
-    # Check DuckDB first
-    try:
-        rows = query(
-            "SELECT id, condition_id, question, slug, active, volume, liquidity, end_date, outcome, resolved_at, meta "
-            "FROM markets WHERE id = ?",
-            [market_id],
-        )
-        if rows:
-            row = rows[0]
-            return {
-                "id": row[0],
-                "condition_id": row[1],
-                "question": row[2],
-                "slug": row[3],
-                "active": row[4],
-                "volume": row[5],
-                "liquidity": row[6],
-                "end_date": row[7],
-                "outcome": row[8],
-                "resolved_at": row[9],
-                "meta": row[10],
-            }
-    except Exception as exc:
-        log.debug("db_lookup_failed", market_id=market_id, error=str(exc))
+    from storage import cache as redis_cache
 
-    # Fallback: fetch from API
+    # Layer 1: Check Redis cache (unless force_refresh)
+    if not force_refresh:
+        try:
+            # Note: cache.get_state() prefixes with "state:" internally
+            cached = await redis_cache.get_state(f"market:{market_id}")
+            if cached:
+                log.debug("market_cache_hit_redis", market_id=market_id)
+                return cached
+        except Exception as exc:
+            log.debug("redis_get_failed", market_id=market_id, error=str(exc))
+
+    # Layer 2: Check DuckDB
+    if not force_refresh:
+        try:
+            rows = await asyncio.to_thread(
+                query,
+                "SELECT id, condition_id, question, slug, active, volume, liquidity, end_date, outcome, resolved_at, meta "
+                "FROM markets WHERE id = ?",
+                [market_id],
+            )
+            if rows:
+                row = rows[0]
+                market = {
+                    "id": row[0],
+                    "condition_id": row[1],
+                    "question": row[2],
+                    "slug": row[3],
+                    "active": row[4],
+                    "volume": row[5],
+                    "liquidity": row[6],
+                    "end_date": row[7],
+                    "outcome": row[8],
+                    "resolved_at": row[9],
+                    "meta": row[10],
+                }
+                # Refresh Redis cache with DB data
+                try:
+                    await redis_cache.set_state(f"market:{market_id}", market, ttl=3600)
+                except Exception:
+                    pass
+                log.debug("market_cache_hit_db", market_id=market_id)
+                return market
+        except Exception as exc:
+            log.debug("db_lookup_failed", market_id=market_id, error=str(exc))
+
+    # Layer 3: Fetch from API
     url = f"{config.GAMMA_API_BASE}/markets/{market_id}"
     data = await _get_json(url)
     if data is None or not isinstance(data, dict):
@@ -344,9 +404,16 @@ async def get_market(market_id: str) -> dict | None:
 
     market = _normalise_market(data)
 
-    # Cache it in the DB for next time
+    # Cache in Redis (1 hour TTL)
     try:
-        execute(
+        await redis_cache.set_state(f"market:{market_id}", market, ttl=3600)
+    except Exception as exc:
+        log.debug("redis_cache_failed", market_id=market_id, error=str(exc))
+
+    # Cache in DuckDB (persistent)
+    try:
+        await asyncio.to_thread(
+            execute,
             """
             INSERT INTO markets (id, condition_id, question, slug, active, volume, liquidity, end_date, outcome, resolved_at, meta)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -373,6 +440,7 @@ async def get_market(market_id: str) -> dict | None:
     except Exception as exc:
         log.debug("cache_market_failed", market_id=market_id, error=str(exc))
 
+    log.debug("market_fetched_from_api", market_id=market_id)
     return market
 
 

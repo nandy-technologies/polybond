@@ -193,8 +193,10 @@ async def log_paper_trade(
     }
 
     # Persist to DuckDB paper_trades table
+    import asyncio as _aio
     try:
-        execute(
+        await _aio.to_thread(
+            execute,
             "INSERT INTO paper_trades (wallet, market_id, side, price, "
             "recommended_size, kelly_fraction, ts) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",

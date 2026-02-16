@@ -16,6 +16,7 @@ copy-traders into losing positions.  Common red flags:
 
 from __future__ import annotations
 
+import asyncio
 import math
 from datetime import datetime, timezone
 
@@ -216,7 +217,8 @@ async def check_follower_losses(wallet: str) -> float:
         Returns 0.0 if no followers are detected.
     """
     # Get target wallet's trades
-    leader_rows = query(
+    leader_rows = await asyncio.to_thread(
+        query,
         "SELECT market_id, side, ts FROM trades WHERE wallet = ? ORDER BY ts",
         [wallet],
     )
@@ -230,7 +232,8 @@ async def check_follower_losses(wallet: str) -> float:
         leader_epoch = _to_epoch(leader_ts)
 
         # Find follower trades: same market, same side, within the window
-        follower_rows = query(
+        follower_rows = await asyncio.to_thread(
+            query,
             "SELECT DISTINCT t.wallet "
             "FROM trades t "
             "WHERE t.market_id = ? AND t.side = ? AND t.wallet != ? "
@@ -248,7 +251,8 @@ async def check_follower_losses(wallet: str) -> float:
             continue
 
         # Check market outcome
-        market_rows = query(
+        market_rows = await asyncio.to_thread(
+            query,
             "SELECT outcome FROM markets WHERE id = ? AND outcome IS NOT NULL",
             [market_id],
         )
@@ -289,7 +293,8 @@ async def score_honeypot_risk(wallet: str) -> dict:
     risk_components: list[float] = []
 
     # Fetch the wallet's trade history
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         "SELECT wallet, market_id, side, price, size, usd_value, ts "
         "FROM trades WHERE wallet = ? ORDER BY ts ASC",
         [wallet],
@@ -308,7 +313,8 @@ async def score_honeypot_risk(wallet: str) -> dict:
     ]
 
     # Fetch win/loss info from wallet record
-    wallet_rows = query(
+    wallet_rows = await asyncio.to_thread(
+        query,
         "SELECT wins, losses, total_trades FROM wallets WHERE address = ?",
         [wallet],
     )
@@ -369,7 +375,8 @@ async def scan_all_wallets() -> list[dict]:
     except Exception:
         log.warning("watchlist_fetch_failed_falling_back_to_db")
         # Fall back to DuckDB -- get wallets with at least some activity
-        rows = query(
+        rows = await asyncio.to_thread(
+            query,
             "SELECT address FROM wallets WHERE total_trades >= ? ORDER BY elo DESC",
             [config.MIN_RESOLVED_BETS],
         )
@@ -387,7 +394,8 @@ async def scan_all_wallets() -> list[dict]:
 
             # Flag high-risk wallets in DuckDB
             if assessment["risk"] >= 0.5:
-                execute(
+                await asyncio.to_thread(
+                    execute,
                     "UPDATE wallets SET flagged = true, flag_reason = ? WHERE address = ?",
                     [
                         f"honeypot_risk:{assessment['risk']:.2f}|{','.join(assessment['flags'])}",
@@ -421,9 +429,8 @@ def _build_resolved_list(
     """Build a synthetic list of trades with ``won`` annotations.
 
     We don't have per-trade win/loss in the trades table, so we
-    approximate: assign wins to the earliest trades and losses to the
-    latest (conservative -- this slightly *understates* suspicious
-    streaks, which is safer than overstating).
+    distribute wins evenly across trades (round-robin) to avoid
+    artificially creating long win streaks.
     """
     total = wins + losses
     if total == 0:
@@ -433,10 +440,29 @@ def _build_resolved_list(
     resolved = trades[:total] if len(trades) >= total else trades[:]
     result: list[dict] = []
 
-    for i, t in enumerate(resolved):
-        t_copy = dict(t)
-        t_copy["won"] = i < wins  # first N are wins
-        result.append(t_copy)
+    # Distribute wins evenly: every (total/wins)-th trade is a win
+    # This avoids the previous bug of front-loading all wins (which
+    # always created the maximum possible win streak).
+    if wins == 0:
+        for t in resolved:
+            t_copy = dict(t)
+            t_copy["won"] = False
+            result.append(t_copy)
+    elif wins >= len(resolved):
+        for t in resolved:
+            t_copy = dict(t)
+            t_copy["won"] = True
+            result.append(t_copy)
+    else:
+        # Spread wins evenly using stride
+        win_indices = set()
+        stride = len(resolved) / wins
+        for i in range(wins):
+            win_indices.add(int(i * stride))
+        for i, t in enumerate(resolved):
+            t_copy = dict(t)
+            t_copy["won"] = i in win_indices
+            result.append(t_copy)
 
     return result
 

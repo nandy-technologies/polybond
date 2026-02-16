@@ -127,7 +127,7 @@ async def process_resolved_bet(
         "SELECT volume FROM markets WHERE id = ?",
         [market_id],
     )
-    market_volume = market_rows[0][0] if market_rows else 10_000.0
+    market_volume = (market_rows[0][0] or 10_000.0) if market_rows else 10_000.0
 
     # Calculate new Elo
     new_elo = update_elo(current_elo, won, total_trades, market_volume)

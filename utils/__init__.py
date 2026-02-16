@@ -4,7 +4,13 @@ from datetime import datetime
 
 
 def to_epoch(ts) -> float:
-    """Convert various timestamp formats (str, float, int, datetime) to Unix epoch float."""
+    """Convert various timestamp formats (str, float, int, datetime) to Unix epoch float.
+
+    Returns float('inf') for None or unrecognized types so that
+    missing timestamps sort last and don't create false temporal correlations.
+    """
+    if ts is None:
+        return float("inf")
     if isinstance(ts, (int, float)):
         return float(ts)
     if isinstance(ts, datetime):
@@ -14,5 +20,5 @@ def to_epoch(ts) -> float:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             return dt.timestamp()
         except ValueError:
-            return 0.0
-    return 0.0
+            return float("inf")
+    return float("inf")

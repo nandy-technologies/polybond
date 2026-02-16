@@ -40,11 +40,15 @@ DUCKDB_PATH: str = os.getenv("DUCKDB_PATH", str(_project_root / "data" / "polyma
 
 # ── Dashboard ─────────────────────────────────────────────────
 DASHBOARD_PORT: int = int(os.getenv("DASHBOARD_PORT", "8083"))
+DASHBOARD_HOST: str = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_TOKEN: str = os.getenv("DASHBOARD_TOKEN", "")  # set to require ?token= on all routes
 
 # ── Alerts ────────────────────────────────────────────────────
 ALERT_ENABLED: bool = os.getenv("ALERT_ENABLED", "true").lower() == "true"
 ALERT_MIN_ELO: float = float(os.getenv("ALERT_MIN_ELO", "1700"))
 ALERT_MIN_ALPHA: float = float(os.getenv("ALERT_MIN_ALPHA", "0.5"))
+ALERT_TARGET: str = os.getenv("ALERT_TARGET", "")
+IMSG_HANDLE: str = os.getenv("IMSG_HANDLE", "")
 
 # ── Scoring ───────────────────────────────────────────────────
 ELO_K_NEW: int = int(os.getenv("ELO_K_NEW", "32"))

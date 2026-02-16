@@ -230,11 +230,13 @@ async def _store_trades(trades: list[dict]) -> int:
     stored = 0
     for t in trades:
         try:
-            execute(
+            await asyncio.to_thread(
+                execute,
                 """
-                INSERT OR IGNORE INTO trades
+                INSERT INTO trades
                     (id, wallet, market_id, condition_id, side, outcome, price, size, usd_value, ts, source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'data_api')
+                ON CONFLICT DO NOTHING
                 """,
                 [
                     t["id"],
@@ -260,7 +262,8 @@ async def _store_positions(positions: list[dict]) -> int:
     upserted = 0
     for p in positions:
         try:
-            execute(
+            await asyncio.to_thread(
+                execute,
                 """
                 INSERT INTO positions (wallet, market_id, outcome, shares, avg_price, last_updated)
                 VALUES (?, ?, ?, ?, ?, current_timestamp)

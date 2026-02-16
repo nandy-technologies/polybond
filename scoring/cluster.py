@@ -25,6 +25,7 @@ dict ``{wallet: {neighbor: weight, ...}, ...}``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -248,7 +249,8 @@ async def detect_temporal_clusters(
     if window is None:
         window = config.CLUSTER_TIME_WINDOW
 
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         "SELECT wallet, market_id, side, ts FROM trades "
         "WHERE market_id = ? ORDER BY ts",
         [market_id],
@@ -297,7 +299,8 @@ async def detect_portfolio_clusters(
 
     # Fetch positions for all wallets
     placeholders = ", ".join(["?"] * len(wallets))
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         f"SELECT wallet, market_id FROM positions WHERE wallet IN ({placeholders})",
         wallets,
     )
@@ -329,9 +332,10 @@ async def run_cluster_analysis() -> list[dict]:
     confidence.
     """
     # Fetch all trades from the last 7 days
-    rows = query(
+    rows = await asyncio.to_thread(
+        query,
         "SELECT wallet, market_id, side, ts FROM trades "
-        "WHERE ts >= current_timestamp - INTERVAL 7 DAY "
+        "WHERE ts >= current_timestamp - INTERVAL '7 days' "
         "ORDER BY ts",
     )
     trades = [
@@ -340,7 +344,8 @@ async def run_cluster_analysis() -> list[dict]:
     ]
 
     # Fetch funding data
-    funding_rows = query(
+    funding_rows = await asyncio.to_thread(
+        query,
         "SELECT address, funding_type FROM wallets WHERE funding_type IS NOT NULL",
     )
     # For cluster purposes, we group wallets by funding_type + a heuristic.
@@ -373,9 +378,15 @@ async def run_cluster_analysis() -> list[dict]:
 
         # Persist to DuckDB
         try:
-            execute(
-                "INSERT OR REPLACE INTO clusters (id, wallets, correlation, confidence, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+            await asyncio.to_thread(
+                execute,
+                "INSERT INTO clusters (id, wallets, correlation, confidence, discovered_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "wallets = EXCLUDED.wallets, "
+                "correlation = EXCLUDED.correlation, "
+                "confidence = EXCLUDED.confidence, "
+                "discovered_at = EXCLUDED.discovered_at",
                 [
                     idx,
                     json.dumps(sorted(cluster_wallets)),
@@ -386,7 +397,8 @@ async def run_cluster_analysis() -> list[dict]:
             )
             # Tag individual wallets
             for wallet in cluster_wallets:
-                execute(
+                await asyncio.to_thread(
+                    execute,
                     "UPDATE wallets SET cluster_id = ? WHERE address = ?",
                     [idx, wallet],
                 )

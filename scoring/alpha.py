@@ -125,6 +125,7 @@ async def update_wallet_alpha(
     if rows:
         current_cum_alpha, current_elo = rows[0]
         current_cum_alpha = current_cum_alpha or 0.0
+        current_elo = current_elo or config.ELO_BASELINE
     else:
         # First encounter with this wallet -- create a skeleton record
         current_cum_alpha = 0.0

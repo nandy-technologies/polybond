@@ -2792,8 +2792,8 @@ def create_app() -> FastAPI:
                 FROM bond_orders bo
                 LEFT JOIN markets m ON bo.market_id = m.id
                 WHERE bo.status IN ('pending', 'open')
-                ORDER BY bo.created_at DESC LIMIT {BOND_ORDERS_LIMIT}
-                """)
+                ORDER BY bo.created_at DESC LIMIT ?
+                """, [int(BOND_ORDERS_LIMIT)])
             return JSONResponse([{
                 "id": r[0], "clob_order_id": r[1], "market_id": r[2], "token_id": r[3],
                 "outcome": r[4], "price": r[5], "size": round(r[6] or 0, 2),
@@ -2812,12 +2812,14 @@ def create_app() -> FastAPI:
             cat_rows = await aquery(
                 "SELECT COALESCE(m.category, 'Unknown'), SUM(bp.cost_basis) "
                 "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
-                f"WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT {EXPOSURE_CATEGORIES_LIMIT}"
+                "WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT ?",
+                [int(EXPOSURE_CATEGORIES_LIMIT)]
             )
             evt_rows = await aquery(
                 "SELECT COALESCE(NULLIF(m.event_slug, ''), m.question), SUM(bp.cost_basis) "
                 "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
-                f"WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT {EXPOSURE_EVENTS_LIMIT}"
+                "WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT ?",
+                [int(EXPOSURE_EVENTS_LIMIT)]
             )
             return JSONResponse({
                 "categories": [{"name": r[0] or "Unknown", "exposure": round(r[1] or 0, 2)} for r in (cat_rows or [])],
@@ -2898,12 +2900,13 @@ def create_app() -> FastAPI:
     async def api_bonds_equity_curve(request: Request):
         try:
             days = int(request.query_params.get("days", "7"))
-            days = max(1, min(days, 365))
+            days = max(1, min(days, 9999))
         except (ValueError, TypeError):
             return JSONResponse({"error": "Invalid 'days' parameter"}, status_code=400)
         try:
             rows = list(reversed(await aquery(
-                f"SELECT ts, equity, cash, invested, annualized_yield FROM bond_equity WHERE ts >= current_timestamp - INTERVAL '{days} days' ORDER BY ts DESC LIMIT {EQUITY_CURVE_MAX_ROWS}")))
+                "SELECT ts, equity, cash, invested, annualized_yield FROM bond_equity WHERE ts >= current_timestamp - INTERVAL ? DAY ORDER BY ts DESC LIMIT ?",
+                [days, int(EQUITY_CURVE_MAX_ROWS)])))
             data = [{
                 "ts": r[0].strftime("%m/%d %H:%M") if hasattr(r[0], "strftime") else str(r[0]),
                 "equity": round(r[1] or 0, 2),
@@ -3434,7 +3437,8 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
 
-            _opps_cache["ts"] = 0  # Invalidate opportunities cache after buy
+            _opps_cache["ts"] = 0.0  # Invalidate opportunities cache after buy
+            _opps_cache["data"] = None
             return JSONResponse({"ok": True, "order_id": clob_order_id, "price": order_price, "size_usd": size_usd})
         except Exception as exc:
             log.error("watchlist_buy_error", market_id=market_id, error=str(exc))

@@ -23,7 +23,6 @@ from dashboard.dashboard_config import (
     OPPS_POLL_MS, WATCHLIST_POLL_MS, TRADING_STATUS_POLL_MS,
     SIZING_FORMULA, BOND_HISTORY_LIMIT, BOND_OPPORTUNITIES_LIMIT,
     BOND_ORDERS_LIMIT, WATCHLIST_LIMIT, MANUAL_TRADE_OPP_SCORE,
-    EXPOSURE_CATEGORIES_LIMIT, EXPOSURE_EVENTS_LIMIT,
     EQUITY_CURVE_MAX_ROWS, INDEX_CACHE_TTL_SEC, OPPS_CACHE_TTL_SEC,
     FETCH_TIMEOUT_MS, MIN_BUYABLE_USD, DRAWDOWN_WARN_PCT,
 )
@@ -250,6 +249,7 @@ def create_app() -> FastAPI:
                 module_counts=module_counts,
                 uptime=_format_uptime(),
                 rendered_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                rendered_at_et=datetime.now(timezone.utc).strftime("%H:%M") + " ET",
                 bond_enabled=config.BOND_ENABLED,
                 sizing_formula=SIZING_FORMULA,
                 equity_poll_ms=EQUITY_CHART_POLL_MS,
@@ -407,29 +407,6 @@ def create_app() -> FastAPI:
             } for r in rows])
         except Exception as exc:
             log.warning("orders_fetch_error", error=str(exc))
-            return JSONResponse({"error": "Database unavailable"}, status_code=503)
-
-    @app.get("/api/bonds/exposure")
-    async def api_bonds_exposure():
-        try:
-            cat_rows = await aquery(
-                "SELECT COALESCE(m.category, 'Unknown'), SUM(bp.cost_basis) "
-                "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
-                "WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT ?",
-                [int(EXPOSURE_CATEGORIES_LIMIT)]
-            )
-            evt_rows = await aquery(
-                "SELECT COALESCE(NULLIF(m.event_slug, ''), m.question), SUM(bp.cost_basis) "
-                "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
-                "WHERE bp.status IN ('open', 'exiting') GROUP BY 1 ORDER BY 2 DESC LIMIT ?",
-                [int(EXPOSURE_EVENTS_LIMIT)]
-            )
-            return JSONResponse({
-                "categories": [{"name": r[0] or "Unknown", "exposure": round(r[1] or 0, 2)} for r in (cat_rows or [])],
-                "events": [{"name": (r[0] or "?")[:60], "exposure": round(r[1] or 0, 2)} for r in (evt_rows or [])],
-            })
-        except Exception as exc:
-            log.warning("exposure_fetch_error", error=str(exc))
             return JSONResponse({"error": "Database unavailable"}, status_code=503)
 
     _opps_cache: dict[str, object] = {"data": None, "ts": 0.0}

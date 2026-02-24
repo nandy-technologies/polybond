@@ -96,6 +96,7 @@ var _initialLoadDone=false;
   }
 
   // -- Helpers --
+  window.fetchWithTimeout=fetchWithTimeout;
   function fetchWithTimeout(url,opts,ms){
     ms=ms||window.DASHBOARD_CONFIG.fetchTimeoutMs;
     var ctrl=new AbortController();
@@ -324,7 +325,8 @@ var _initialLoadDone=false;
       document.getElementById('kpi-wallet').innerHTML='<span class="bal-val">'+fmtMoney(totalEquity)+'</span>';
       document.getElementById('kpi-wallet-sub').textContent=fmtMoney(wEx)+' cash \u00b7 '+fmtMoney(d.invested)+' invested \u00b7 '+fmtMoney(wOC)+' on-chain \u00b7 '+wPol.toFixed(4)+' POL';
       flashIfChanged('kpi-pnl',netPnl.toFixed(2));
-      document.getElementById('kpi-pnl').innerHTML='<span class="bal-val">'+(netPnl>=0?'+$':'-$')+Math.abs(netPnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>';
+      var pnlPct=totalEquity>0?(netPnl/totalEquity*100):0;
+      document.getElementById('kpi-pnl').innerHTML='<span class="bal-val">'+(netPnl>=0?'+$':'-$')+Math.abs(netPnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span> <span style="font-size:0.65em;opacity:0.7">('+( pnlPct>=0?'+':'')+pnlPct.toFixed(2)+'%)</span>';
       document.getElementById('kpi-pnl').className='value '+pnlClass(netPnl);
       var rpnl=d.realized_pnl||0;var upnl=d.unrealized_pnl||0;
       document.getElementById('kpi-pnl-sub').textContent=(rpnl>=0?'+$':'-$')+Math.abs(rpnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' realized \u00b7 '+(upnl>=0?'+$':'-$')+Math.abs(upnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' unrealized';
@@ -357,7 +359,7 @@ var _initialLoadDone=false;
       }
       document.getElementById('header-positions').textContent=(d.position_count||0)+' positions';
       document.getElementById('header-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC)+'</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>'+wPol.toFixed(4)+'<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span>';
-      var frEl=document.getElementById('footer-rendered');if(frEl)frEl.textContent='Last updated '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})+' ET';
+      var frEl=document.getElementById('footer-rendered');if(frEl)frEl.textContent='Data as of '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York',hour12:false})+' ET';
     }).catch(function(err){
       console.warn('KPI refresh failed:', err);
     });
@@ -594,6 +596,7 @@ var _initialLoadDone=false;
   var _oppsSortAsc=false;
   var _oppsColWidth=null;
   var _oppsResizing=false;
+  var _oppsLastJson='';
 
   function bar(v){var nv=Math.min(1,Math.max(0,N(v)));var w=Math.max(2,Math.round(nv*60));var cls=nv<0.3?'factor-bar factor-bar-dim':nv>=0.7?'factor-bar factor-bar-strong':'factor-bar';return '<span class="factor-track"><span class="'+cls+'" style="width:'+w+'px"></span></span><span class="factor-val">'+nv.toFixed(2)+'</span>';}
 
@@ -814,6 +817,9 @@ var _initialLoadDone=false;
     _oppsLoading=true;
     fetchWithTimeout(apiUrl('/api/bonds/opportunities')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('opportunities-table').innerHTML=errorHtml(data.error,'loadOpportunities');document.getElementById('opps-count').textContent='error';return;}
+      var newJson=JSON.stringify(data);
+      if(newJson===_oppsLastJson)return;
+      _oppsLastJson=newJson;
       _oppsData=Array.isArray(data)?data:[];
       _oppsData=_oppsData.filter(function(r){return r.opportunity_score>0;});
       renderOpportunities(_oppsData);
@@ -837,6 +843,7 @@ var _initialLoadDone=false;
       {label:'EWMA',key:'ewma_price',num:true},{label:'Z-Score',key:'z_score',num:true},
       {label:'Intensity',key:'alert_intensity',num:true},{label:'Volume',key:'volume',num:true},
       {label:'Last Alert',key:'last_alerted_at'},
+      {label:'Expires',key:'end_date'},
       {label:'Position',key:null},{label:'Trade',key:null}
     ];
     var html='<div class="table-wrap"><table id="watch-tbl"><thead><tr>';
@@ -861,6 +868,7 @@ var _initialLoadDone=false;
       html+='<td class="num factor-cell">'+bar(r.alert_intensity)+'</td>';
       html+='<td class="num">$'+Math.round(N(r.volume)).toLocaleString('en-US')+'</td>';
       html+='<td class="td-muted">'+(r.last_alerted_at?relTime(r.last_alerted_at):'\u2014')+'</td>';
+      html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
 
       // Position column
       var posHtml='\u2014';
@@ -1040,7 +1048,7 @@ var _initialLoadDone=false;
   }
   function fetchStatus(){
     if(_tabHidden)return;
-    fetch(apiUrl('/api/trading/status')).then(function(r){return r.json()})
+    fetchWithTimeout(apiUrl('/api/trading/status')).then(function(r){return r.json()})
       .then(function(d){
         updateUI(d.trading_enabled);
         var banner=document.getElementById('trading-paused-banner');
@@ -1060,7 +1068,7 @@ var _initialLoadDone=false;
     okBtn.onclick=function(){
       overlay.classList.remove('active');
       btn.disabled=true;
-      fetch(apiUrl('/api/trading/toggle'),{
+      fetchWithTimeout(apiUrl('/api/trading/toggle'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({enabled:ns})
       }).then(function(r){return r.json()})

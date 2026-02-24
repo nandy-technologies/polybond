@@ -120,7 +120,8 @@
           </div>
           <div class="stat-card stat-card-hero">
             {% set net_pnl = overview.realized_pnl + overview.unrealized_pnl %}
-            <div class="value {{ 'pnl-positive' if net_pnl > 0 else 'pnl-negative' if net_pnl < 0 else '' }}" id="kpi-pnl"><span class="bal-val">{{ "+" if net_pnl >= 0 else "-" }}${{ "{:,.2f}".format(net_pnl|abs) }}</span></div>
+            {% set pnl_pct = (net_pnl / equity * 100) if equity > 0 else 0 %}
+            <div class="value {{ 'pnl-positive' if net_pnl > 0 else 'pnl-negative' if net_pnl < 0 else '' }}" id="kpi-pnl"><span class="bal-val">{{ "+" if net_pnl >= 0 else "-" }}${{ "{:,.2f}".format(net_pnl|abs) }}</span> <span style="font-size:0.65em;opacity:0.7">({{ "{:+.2f}".format(pnl_pct) }}%)</span></div>
             <div class="label">Net P&amp;L</div>
             <div class="sublabel" id="kpi-pnl-sub">{{ "+" if overview.realized_pnl >= 0 else "-" }}${{ "{:,.2f}".format(overview.realized_pnl|abs) }} realized · {{ "+" if overview.unrealized_pnl >= 0 else "-" }}${{ "{:,.2f}".format(overview.unrealized_pnl|abs) }} unrealized</div>
           </div>
@@ -129,14 +130,6 @@
           <div class="stat-card accent-gold">
             <div class="value" id="kpi-yield">{{ "%.1f"|format(overview.annualized_yield * 100) }}%</div>
             <div class="label">Ann. Yield</div>
-          </div>
-          <div class="stat-card">
-            <div class="value" id="kpi-cash"><span class="bal-val">${{ "{:,.2f}".format(overview.cash) }}</span></div>
-            <div class="label">Cash</div>
-          </div>
-          <div class="stat-card">
-            <div class="value" id="kpi-invested"><span class="bal-val">${{ "{:,.2f}".format(overview.invested) }}</span></div>
-            <div class="label">Invested</div>
           </div>
           <div class="stat-card">
             <div class="value" id="kpi-winrate">{{ "%.0f"|format(overview.win_rate * 100) }}%</div>
@@ -288,18 +281,20 @@
   <div class="tab-content" id="tab-watchlist">
     <div class="grid">
       <div class="panel panel-wide">
-        <h2>Domain Watchlist</h2>
-        <p class="info-text">
-          Monitors crypto and DeFi markets using an <strong>EWMA</strong> (exponentially weighted moving average)
-          to detect unusual price movements. <strong>Z-score</strong> measures deviation from the moving average &mdash;
-          high absolute values signal anomalies. <strong>Intensity</strong> combines z-score with volume
-          to prioritize alerts.
-        </p>
-      </div>
-      <div class="panel panel-wide">
         <h2>Crypto/DeFi Markets <span class="badge" id="watchlist-count">loading</span></h2>
         <div id="watchlist-table">
           <div class="skeleton-table"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+        </div>
+      </div>
+      <div class="panel panel-wide panel-secondary">
+        <h2 class="panel-collapse-toggle collapsed" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('collapsed')">About Domain Watchlist <span class="badge">Info</span></h2>
+        <div class="panel-collapsible collapsed">
+          <p class="info-text" style="padding:0.75rem 0">
+            Monitors crypto and DeFi markets using an <strong>EWMA</strong> (exponentially weighted moving average)
+            to detect unusual price movements. <strong>Z-score</strong> measures deviation from the moving average &mdash;
+            high absolute values signal anomalies. <strong>Intensity</strong> combines z-score with volume
+            to prioritize alerts.
+          </p>
         </div>
       </div>
     </div>
@@ -457,33 +452,38 @@
             <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
             <tbody>
               <tr><td>Enabled</td><td>{{ bond_enabled }}</td></tr>
-              <tr><td>Scan Interval</td><td>{{ bond_scan_interval }}s</td></tr>
-              <tr><td>Liquidity Scale</td><td>${{ "%.0f"|format(bond_liquidity_scale) }}</td></tr>
-              <tr><td>Time Tau</td><td>{{ bond_time_tau }} days</td></tr>
-              <tr><td>Volume Scale</td><td>${{ "%.0f"|format(bond_volume_scale) }}</td></tr>
-              <tr><td>Yield Scale</td><td>{{ bond_yield_scale }}</td></tr>
+              <tr class="config-section-header"><td colspan="2">Sizing</td></tr>
               <tr><td>Kelly Prior</td><td>Beta({{ bond_kelly_alpha }}, {{ bond_kelly_beta }})</td></tr>
               <tr><td>Execution Degradation</td><td>{{ "%.0f"|format(bond_exec_degradation * 100) }}%</td></tr>
               <tr><td>Concentration Sigma</td><td>{{ bond_conc_sigma }}</td></tr>
               <tr><td>Diversification Decay</td><td>{{ bond_div_decay }}</td></tr>
-              <tr><td>Cooldown Tau</td><td>{{ bond_cooldown_tau }}s</td></tr>
               <tr><td>Max Order</td><td>{{ "%.0f"|format(bond_max_order_pct * 100) }}%</td></tr>
+              <tr><td>Event Cap</td><td>{{ "%.0f"|format(bond_max_event_pct * 100) }}%</td></tr>
+              <tr><td>Averaging</td><td>{{ "Enabled (max " ~ bond_max_position_adds ~ " adds)" if bond_allow_averaging else "Disabled" }}</td></tr>
+              <tr><td>Balance Haircut</td><td>{{ "%.0f"|format(balance_haircut_factor * 100) }}%</td></tr>
+              <tr><td>Taker Threshold</td><td>score {{ bond_taker_score_threshold }} / days {{ bond_taker_days_threshold }}</td></tr>
+              <tr class="config-section-header"><td colspan="2">Risk Limits</td></tr>
+              <tr><td>Halt Drawdown</td><td>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}% / min ${{ bond_halt_min_equity }}</td></tr>
+              <tr><td>Daily Limits</td><td>{{ bond_max_daily_orders }} orders / {{ "%.0f"|format(bond_max_daily_capital_pct * 100) }}% capital</td></tr>
+              <tr><td>Stop Loss</td><td>{{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</td></tr>
               <tr><td>Auto-Exit Severity</td><td>{{ "%.1f"|format(bond_auto_exit_severity) }}x gain</td></tr>
               <tr><td>Auto-Exit Tight</td><td>{{ "%.1f"|format(bond_auto_exit_severity_tight) }}x gain</td></tr>
-              <tr><td>Resolution Lag</td><td>{{ bond_resolution_lag_days }}d</td></tr>
-              <tr><td>Event Cap</td><td>{{ "%.0f"|format(bond_max_event_pct * 100) }}%</td></tr>
-              <tr><td>Taker Threshold</td><td>score {{ bond_taker_score_threshold }} / days {{ bond_taker_days_threshold }}</td></tr>
-              <tr><td>Daily Limits</td><td>{{ bond_max_daily_orders }} orders / {{ "%.0f"|format(bond_max_daily_capital_pct * 100) }}% capital</td></tr>
-              <tr><td>Adaptive Pricing</td><td>{{ bond_adaptive_pricing }} / {{ bond_price_improve_secs }}s</td></tr>
-              <tr><td>Halt Drawdown</td><td>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}% / min ${{ bond_halt_min_equity }}</td></tr>
               <tr><td>Order Timeout</td><td>{{ bond_order_timeout }}h</td></tr>
-              <tr><td>Stop Loss</td><td>{{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</td></tr>
+              <tr class="config-section-header"><td colspan="2">Scoring</td></tr>
+              <tr><td>Min Score</td><td>{{ bond_min_score }}</td></tr>
+              <tr><td>Yield Scale</td><td>{{ bond_yield_scale }}</td></tr>
+              <tr><td>Liquidity Scale</td><td>${{ "%.0f"|format(bond_liquidity_scale) }}</td></tr>
+              <tr><td>Time Tau</td><td>{{ bond_time_tau }} days</td></tr>
+              <tr><td>Volume Scale</td><td>${{ "%.0f"|format(bond_volume_scale) }}</td></tr>
+              <tr class="config-section-header"><td colspan="2">Timing</td></tr>
+              <tr><td>Scan Interval</td><td>{{ bond_scan_interval }}s</td></tr>
+              <tr><td>Cooldown Tau</td><td>{{ bond_cooldown_tau }}s</td></tr>
+              <tr><td>Adaptive Pricing</td><td>{{ bond_adaptive_pricing }} / {{ bond_price_improve_secs }}s</td></tr>
+              <tr><td>Resolution Lag</td><td>{{ bond_resolution_lag_days }}d</td></tr>
+              <tr class="config-section-header"><td colspan="2">Filters</td></tr>
               <tr><td>Entry Price Range</td><td>${{ bond_min_entry_price }} &ndash; ${{ bond_max_entry_price }}</td></tr>
               <tr><td>Min Volume</td><td>${{ "{:,.0f}".format(bond_min_volume) }}</td></tr>
               <tr><td>Min Liquidity</td><td>${{ "{:,.0f}".format(bond_min_liquidity) }}</td></tr>
-              <tr><td>Min Score</td><td>{{ bond_min_score }}</td></tr>
-              <tr><td>Averaging</td><td>{{ "Enabled (max " ~ bond_max_position_adds ~ " adds)" if bond_allow_averaging else "Disabled" }}</td></tr>
-              <tr><td>Balance Haircut</td><td>{{ "%.0f"|format(balance_haircut_factor * 100) }}%</td></tr>
               <tr><td>Domain Watch</td><td>{{ domain_watch_enabled }}</td></tr>
             </tbody>
           </table>
@@ -495,7 +495,7 @@
 
   <footer>
     <span>{{ uptime }}</span> &middot;
-    <span id="footer-rendered">Last rendered {{ rendered_at }}</span> &middot;
+    <span id="footer-rendered">Data as of {{ rendered_at_et }}</span> &middot;
     <a href="https://nandytech.net" target="_blank" rel="noopener noreferrer">Nandy Universe</a>
   </footer>
 

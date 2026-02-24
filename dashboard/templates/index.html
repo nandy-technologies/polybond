@@ -113,9 +113,10 @@
         <h2>Key Metrics</h2>
         <div class="kpi-hero-row">
           <div class="stat-card stat-card-hero">
-            <div class="value" id="kpi-wallet"><span class="bal-val">${{ "{:,.2f}".format((overview.wallet_usdc_onchain or 0) + (overview.wallet_usdc or 0)) }}</span></div>
-            <div class="label">Wallet</div>
-            <div class="sublabel" id="kpi-wallet-sub">${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }} on-chain · ${{ "{:,.2f}".format(overview.wallet_usdc or 0) }} exchange · {{ "{:,.4f}".format(overview.wallet_pol or 0) }} POL</div>
+            {% set equity = (overview.wallet_usdc or 0) + (overview.invested or 0) %}
+            <div class="value" id="kpi-wallet"><span class="bal-val">${{ "{:,.2f}".format(equity) }}</span></div>
+            <div class="label">Equity</div>
+            <div class="sublabel" id="kpi-wallet-sub">${{ "{:,.2f}".format(overview.wallet_usdc or 0) }} cash · ${{ "{:,.2f}".format(overview.invested or 0) }} invested · ${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }} on-chain · {{ "{:,.4f}".format(overview.wallet_pol or 0) }} POL</div>
           </div>
           <div class="stat-card stat-card-hero">
             {% set net_pnl = overview.realized_pnl + overview.unrealized_pnl %}
@@ -151,17 +152,7 @@
             <div class="value" id="kpi-avg-days">&mdash;</div>
             <div class="label">Avg Days Left</div>
           </div>
-          <div class="stat-card">
-            <div class="value" id="kpi-cap-util">&mdash;</div>
-            <div class="label">Capital Util</div>
-            <div class="cap-util-wrap">
-              <div class="cap-util-track"><div class="cap-util-fill" id="kpi-cap-util-bar" style="width:0%;background:var(--accent)"></div></div>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="value" id="kpi-scan-stats"><span class="freshness-dot freshness-dead"></span>&mdash;</div>
-            <div class="label">Last Scan</div>
-          </div>
+          <!-- Capital Util and Last Scan removed -->
         </div>
         <div class="kpi-secondary-row">
           <div class="stat-card">

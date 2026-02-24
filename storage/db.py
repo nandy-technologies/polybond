@@ -261,6 +261,10 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
      "ALTER TABLE bond_positions ADD COLUMN condition_id VARCHAR"),
     (11, "Add index on bond_orders.created_at for time-range queries",
      "CREATE INDEX IF NOT EXISTS idx_bond_orders_created ON bond_orders(created_at)"),
+    (12, "Add redeemed_tx to bond_positions for on-chain redemption tracking",
+     "ALTER TABLE bond_positions ADD COLUMN redeemed_tx VARCHAR"),
+    (13, "Add unique partial index on bond_positions to prevent duplicate open positions",
+     "CREATE UNIQUE INDEX IF NOT EXISTS idx_bond_positions_unique_open ON bond_positions(market_id, token_id) WHERE status IN ('open', 'exiting')"),
 ]
 
 

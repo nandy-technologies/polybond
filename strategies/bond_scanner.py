@@ -28,6 +28,7 @@ from strategies.bond_scoring import (
     market_quality,
     spread_efficiency,
 )
+from feeds.clob_ws import get_orderbook as get_ws_orderbook, cache_orderbook
 from storage.db import aquery, aexecute
 from utils import log_id
 from utils.datetime_helpers import ensure_utc
@@ -301,9 +302,7 @@ def _parse_token_ids(meta_str: str | None) -> list[str]:
 
 async def _get_orderbook_with_rest_fallback(token_id: str) -> dict | None:
     """Get orderbook from WS cache, falling back to REST API if missing."""
-    from feeds.clob_ws import get_orderbook, cache_orderbook
-
-    ob = get_orderbook(token_id)
+    ob = get_ws_orderbook(token_id)
     if ob is not None:
         return ob
 
@@ -338,6 +337,8 @@ async def scan_bond_candidates() -> list[dict]:
     if not rows:
         log.debug("no_active_markets_for_bonds")
         return []
+
+    global _negative_cache_hits
 
     now = datetime.now(timezone.utc)
     candidates = []
@@ -375,19 +376,16 @@ async def scan_bond_candidates() -> list[dict]:
                 cache_key = (market_id, token_id)
                 if cache_key in _negative_cache:
                     cached = _negative_cache[cache_key]
-                    from feeds.clob_ws import get_orderbook as _get_ob_check
-                    current_ob = _get_ob_check(token_id, max_age=0)
+                    current_ob = get_ws_orderbook(token_id, max_age=0)
                     if current_ob:
                         current_ts = current_ob.get("ts", 0)
                         if current_ts <= cached.ws_cache_ts:
-                            global _negative_cache_hits
                             _negative_cache_hits += 1
                             continue
                     del _negative_cache[cache_key]
 
                 # Stale WS cache price pre-filter
-                from feeds.clob_ws import get_orderbook
-                stale_ob = get_orderbook(token_id, max_age=0)
+                stale_ob = get_ws_orderbook(token_id, max_age=0)
                 if stale_ob is not None:
                     stale_price = stale_ob.get("best_ask", 0)
                     if stale_price > 0:
@@ -397,7 +395,7 @@ async def scan_bond_candidates() -> list[dict]:
                             continue
 
                 # Prioritize fresh WS data
-                ob = get_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)
+                ob = get_ws_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)
                 if ob is not None:
                     ws_cache_hits += 1
                     _ob_map[token_id] = ob
@@ -915,8 +913,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         # Re-fetch live orderbook to avoid stale scan-time prices
         # Optimization #4: Require fresh WS data (<30s) for order placement
         # This ensures price-sensitive operations use the most current market data
-        from feeds.clob_ws import get_orderbook as _get_live_ob
-        live_ob = _get_live_ob(token_id, max_age=config.BOND_OB_FRESH_AGE)  # WS primary, REST fallback disabled here
+        live_ob = get_ws_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)  # WS primary, REST fallback disabled here
         best_bid = live_ob.get("best_bid", candidate["best_bid"]) if live_ob else candidate["best_bid"]
         best_ask = live_ob.get("best_ask", candidate["best_ask"]) if live_ob else candidate["best_ask"]
         if best_bid <= 0 or best_ask <= 0:
@@ -946,7 +943,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         )
         if is_taker:
             # Require fresh orderbook for taker orders — fall back to REST if WS is stale
-            fresh_ob = _get_live_ob(token_id, max_age=config.BOND_TAKER_OB_MAX_AGE)
+            fresh_ob = get_ws_orderbook(token_id, max_age=config.BOND_TAKER_OB_MAX_AGE)
             if fresh_ob and fresh_ob.get("best_ask"):
                 order_price = fresh_ob["best_ask"]
             else:

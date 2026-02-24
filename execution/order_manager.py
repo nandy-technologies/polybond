@@ -6,7 +6,6 @@ Four async loops that manage the lifecycle of bond orders and positions.
 from __future__ import annotations
 
 import asyncio
-import math
 from datetime import datetime, timezone
 
 import orjson
@@ -693,6 +692,11 @@ async def check_resolutions() -> None:
                 try:
                     from execution.clob_client import redeem_positions
                     redeem_tx = await redeem_positions(condition_id, neg_risk=bool(neg_risk))
+                    if redeem_tx:
+                        await aexecute(
+                            "UPDATE bond_positions SET redeemed_tx = ?, updated_at = current_timestamp WHERE id = ?",
+                            [redeem_tx, pos_id],
+                        )
                 except Exception as exc:
                     log.warning("redeem_after_resolution_failed", pos_id=pos_id, error=str(exc))
 
@@ -1168,6 +1172,8 @@ async def run_order_fill_once() -> None:
 _mtm_counter: int = 0
 # Reconciliation counter — run every 5 cycles (5 min at 60s intervals)
 _reconcile_counter: int = 0
+# Redemption retry counter
+_redeem_retry_counter: int = 0
 
 
 async def _recover_stranded_exiting() -> None:
@@ -1198,9 +1204,51 @@ async def _recover_stranded_exiting() -> None:
         log.warning("stranded_exit_recovery_error", error=str(exc))
 
 
+async def _retry_failed_redemptions() -> None:
+    """Sweep for resolved positions where on-chain redemption failed.
+
+    Queries bond_positions with status in ('resolved_win', 'resolved_loss')
+    where redeemed_tx IS NULL, and retries the redeem_positions() call.
+    This handles transient failures like gas spikes or RPC timeouts.
+    """
+    try:
+        rows = await aquery(
+            """
+            SELECT bp.id, bp.condition_id, m.neg_risk
+            FROM bond_positions bp
+            JOIN markets m ON bp.market_id = m.id
+            WHERE bp.status IN ('resolved_win', 'resolved_loss')
+              AND bp.condition_id IS NOT NULL
+              AND bp.redeemed_tx IS NULL
+            """
+        )
+        if not rows:
+            return
+
+        log.info("redeem_retry_sweep_start", pending_count=len(rows))
+
+        for pos_id, condition_id, neg_risk in rows:
+            try:
+                from execution.clob_client import redeem_positions
+                tx_hash = await redeem_positions(condition_id, neg_risk=bool(neg_risk))
+                if tx_hash:
+                    await aexecute(
+                        "UPDATE bond_positions SET redeemed_tx = ?, updated_at = current_timestamp WHERE id = ?",
+                        [tx_hash, pos_id],
+                    )
+                    log.info("redeem_retry_success", pos_id=pos_id, tx=tx_hash[:16])
+                else:
+                    log.warning("redeem_retry_no_tx", pos_id=pos_id)
+            except Exception as exc:
+                log.warning("redeem_retry_failed", pos_id=pos_id, error=str(exc))
+
+    except Exception as exc:
+        log.warning("redeem_retry_sweep_error", error=str(exc))
+
+
 async def run_bond_position_once() -> None:
     """Single iteration of MTM + resolution + reconciliation + equity snapshot."""
-    global _mtm_counter, _reconcile_counter
+    global _mtm_counter, _reconcile_counter, _redeem_retry_counter
 
     await update_position_mtm()
     await check_resolutions()
@@ -1217,3 +1265,8 @@ async def run_bond_position_once() -> None:
     if _mtm_counter >= config.BOND_RECONCILE_CYCLES:
         await snapshot_bond_equity()
         _mtm_counter = 0
+
+    _redeem_retry_counter += 1
+    if _redeem_retry_counter >= config.BOND_REDEEM_RETRY_CYCLES:
+        await _retry_failed_redemptions()
+        _redeem_retry_counter = 0

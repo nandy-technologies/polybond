@@ -171,7 +171,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
     import urllib.request
     from web3 import Web3
 
-    USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+    USDC_NATIVE = config.USDC_NATIVE_ADDRESS
     USDC_E = config.POLYMARKET_USDC_E_ADDRESS
     PARASWAP_PROXY = config.PARASWAP_PROXY_ADDRESS
 
@@ -402,8 +402,8 @@ def get_onchain_balances_sync() -> dict:
     """Get on-chain POL (native), USDC.e, and native USDC balances."""
     from web3 import Web3
 
-    USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-    USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+    USDC_E = config.POLYMARKET_USDC_E_ADDRESS
+    USDC_NATIVE = config.USDC_NATIVE_ADDRESS
     BALANCE_OF_ABI = [{"constant": True, "inputs": [{"name": "account", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}], "type": "function"}]
 
     w3 = Web3(Web3.HTTPProvider(config.POLYGON_RPC_URL))

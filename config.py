@@ -265,3 +265,9 @@ BOND_RECONCILE_CYCLES: int = int(os.getenv("BOND_RECONCILE_CYCLES", "5"))
 
 # -- Fallback defaults --------------------------------------------------------
 BOND_DEFAULT_DAYS_REMAINING: float = float(os.getenv("BOND_DEFAULT_DAYS_REMAINING", "30.0"))
+
+# -- Redemption retry sweep ----------------------------------------------------
+BOND_REDEEM_RETRY_CYCLES: int = int(os.getenv("BOND_REDEEM_RETRY_CYCLES", "10"))
+
+# -- USDC native address (Polygon) --------------------------------------------
+USDC_NATIVE_ADDRESS: str = os.getenv("USDC_NATIVE_ADDRESS", "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")

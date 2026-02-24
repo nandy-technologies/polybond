@@ -13,12 +13,13 @@ import websockets
 import websockets.exceptions
 
 import config
+from utils.datetime_helpers import ensure_utc
 from utils.logger import get_logger
 
 log = get_logger("clob_ws")
 
 # ── Module state ─────────────────────────────────────────────
-_MAX_SUBSCRIPTIONS: int = 500
+_MAX_SUBSCRIPTIONS: int = config.WS_MAX_SUBSCRIPTIONS
 
 _ws: websockets.WebSocketClientProtocol | None = None
 _subscribed_markets: set[str] = set()
@@ -31,9 +32,9 @@ _reconnect_count: int = 0
 _orderbooks: OrderedDict[str, dict] = OrderedDict()
 
 # Backoff parameters
-_BACKOFF_BASE: float = 1.0
-_BACKOFF_MAX: float = 60.0
-_BACKOFF_FACTOR: float = 2.0
+_BACKOFF_BASE: float = config.WS_BACKOFF_BASE
+_BACKOFF_MAX: float = config.WS_BACKOFF_MAX
+_BACKOFF_FACTOR: float = config.WS_BACKOFF_FACTOR
 
 # Background task set to prevent GC of fire-and-forget tasks
 _background_tasks: set = set()
@@ -92,8 +93,7 @@ def _parse_fill(raw: dict) -> dict | None:
                 tz=timezone.utc,
             )
         elif isinstance(ts_raw, str) and ts_raw:
-            ts_raw_clean = ts_raw.rstrip("Z")
-            ts = datetime.fromisoformat(ts_raw_clean).replace(tzinfo=timezone.utc)
+            ts = ensure_utc(ts_raw)
         else:
             ts = datetime.now(timezone.utc)
 
@@ -168,6 +168,7 @@ def _parse_orderbook(raw: dict) -> dict | None:
                 else:
                     mid_price = 0.0
                 asset_id = pc.get("asset_id", "")
+                prev = _orderbooks.get(asset_id) if asset_id else None
                 entry = {
                     "market_id": market_id,
                     "asset_id": asset_id,
@@ -177,11 +178,12 @@ def _parse_orderbook(raw: dict) -> dict | None:
                     "best_ask": best_ask,
                     "spread": round(spread, 4),
                     "mid_price": round(mid_price, 4),
+                    "ask_depth": prev.get("ask_depth", 0) if prev else 0,
+                    "bid_depth": prev.get("bid_depth", 0) if prev else 0,
                     "ts": now,
                 }
                 # Store each asset directly (prevents batch data loss)
                 if asset_id:
-                    prev = _orderbooks.get(asset_id)
                     if prev is not None:
                         new_asks = entry.get("asks", [])
                         if (len(new_asks) == 1 and new_asks[0].get("size", 0) == 0
@@ -194,7 +196,7 @@ def _parse_orderbook(raw: dict) -> dict | None:
                     _orderbooks.move_to_end(asset_id)
                 result = entry
             # Cap cache after batch insertion
-            while len(_orderbooks) > 500:
+            while len(_orderbooks) > _MAX_SUBSCRIPTIONS:
                 _orderbooks.popitem(last=False)
             return result
 
@@ -226,6 +228,10 @@ def _parse_orderbook(raw: dict) -> dict | None:
         else:
             mid_price = 0.0
 
+        # Compute and cache depth (sum of price*size for top levels)
+        ask_depth = sum(a["price"] * a["size"] for a in parsed_asks[:10])
+        bid_depth = sum(b["price"] * b["size"] for b in parsed_bids[:10])
+
         return {
             "market_id": market_id,
             "asset_id": raw.get("asset_id", ""),
@@ -235,6 +241,8 @@ def _parse_orderbook(raw: dict) -> dict | None:
             "best_ask": best_ask,
             "spread": round(spread, 4),
             "mid_price": round(mid_price, 4),
+            "ask_depth": round(ask_depth, 4),
+            "bid_depth": round(bid_depth, 4),
             "ts": time.time(),
         }
     except (ValueError, TypeError, KeyError) as exc:
@@ -264,7 +272,7 @@ def cache_orderbook(token_id: str, ob: dict) -> None:
     """Insert an orderbook entry into the cache (e.g. from REST fallback)."""
     _orderbooks[token_id] = ob
     _orderbooks.move_to_end(token_id)
-    while len(_orderbooks) > 500:
+    while len(_orderbooks) > _MAX_SUBSCRIPTIONS:
         _orderbooks.popitem(last=False)
 
 
@@ -341,10 +349,10 @@ async def run(
             log.info("connecting", url=config.CLOB_WS_URL)
             async with websockets.connect(
                 config.CLOB_WS_URL,
-                ping_interval=20,
-                ping_timeout=10,
-                close_timeout=5,
-                max_size=2**22,  # 4 MiB
+                ping_interval=config.WS_PING_INTERVAL,
+                ping_timeout=config.WS_PING_TIMEOUT,
+                close_timeout=config.WS_CLOSE_TIMEOUT,
+                max_size=config.WS_MAX_MESSAGE_SIZE,
             ) as ws:
                 _ws = ws
                 _reconnect_attempts = 0
@@ -368,7 +376,7 @@ async def run(
                         raise
 
                 # Auto-discover and subscribe to active/popular markets
-                await auto_subscribe_active_markets(ws, limit=200)
+                await auto_subscribe_active_markets(ws, limit=config.WS_AUTO_SUBSCRIBE_LIMIT)
 
                 async for raw_msg in ws:
                     _last_message_ts = time.monotonic()
@@ -404,7 +412,7 @@ async def run(
                             _orderbooks[ob_key] = ob
                             _orderbooks.move_to_end(ob_key)
                             # Cap orderbook cache — evict oldest (front of OrderedDict)
-                            while len(_orderbooks) > 500:
+                            while len(_orderbooks) > _MAX_SUBSCRIPTIONS:
                                 _orderbooks.popitem(last=False)
                             if on_orderbook is not None:
                                 try:
@@ -604,7 +612,7 @@ async def prune_stale_subscriptions(force_count: int = 0) -> None:
 
         if stale and _ws and not _ws.closed:
             # Unsubscribe in batches — only evict cache for tokens we actually unsub
-            batch = list(stale)[:100]  # Cap to avoid huge unsubscribe bursts
+            batch = list(stale)[:config.WS_PRUNE_BATCH_SIZE]  # Cap to avoid huge unsubscribe bursts
             for tid in batch:
                 try:
                     await unsubscribe_market(_ws, tid)
@@ -626,7 +634,7 @@ async def health_check() -> bool:
     # minutes between messages while the connection is alive via pings.
     if _last_message_ts == 0.0:
         # Just connected, no messages yet — grace period
-        if _connect_time > 0 and (time.monotonic() - _connect_time) > 300.0:
+        if _connect_time > 0 and (time.monotonic() - _connect_time) > config.WS_HEALTH_MAX_AGE:
             return False
         return True
-    return (time.monotonic() - _last_message_ts) < 300.0
+    return (time.monotonic() - _last_message_ts) < config.WS_HEALTH_MAX_AGE

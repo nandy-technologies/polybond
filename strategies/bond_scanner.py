@@ -29,6 +29,8 @@ from strategies.bond_scoring import (
     spread_efficiency,
 )
 from storage.db import aquery, aexecute
+from utils import log_id
+from utils.datetime_helpers import ensure_utc
 from utils.logger import get_logger
 
 log = get_logger("bond_scanner")
@@ -144,7 +146,7 @@ def compute_bond_size(
     # 1. Kelly fraction — Bayesian with bond prior
     # Fix #18: Decay prior strength as sample size grows
     total_trades = wins + losses
-    prior_decay = math.exp(-total_trades / 50.0) if total_trades > 0 else 1.0
+    prior_decay = math.exp(-total_trades / config.BOND_KELLY_PRIOR_DECAY_TRADES) if total_trades > 0 else 1.0
     effective_alpha = config.BOND_KELLY_PRIOR_ALPHA * prior_decay
     effective_beta = config.BOND_KELLY_PRIOR_BETA * prior_decay
     
@@ -311,10 +313,7 @@ async def scan_bond_candidates() -> list[dict]:
     for market_id, question, volume, end_date, meta_str, condition_id, slug, event_slug, event_title in rows:
         try:
             # Parse end_date
-            if isinstance(end_date, str):
-                end_dt = datetime.fromisoformat(end_date.rstrip("Z")).replace(tzinfo=timezone.utc)
-            else:
-                end_dt = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
+            end_dt = ensure_utc(end_date)
 
             days_remaining = max(0, (end_dt - now).total_seconds() / 86400)
             if days_remaining <= 0:
@@ -355,19 +354,19 @@ async def scan_bond_candidates() -> list[dict]:
                 if stale_ob is not None:
                     stale_price = stale_ob.get("best_ask", 0)
                     if stale_price > 0:
-                        if stale_price < config.BOND_MIN_ENTRY_PRICE * 0.94:
+                        if stale_price < config.BOND_MIN_ENTRY_PRICE * config.BOND_PREFILTER_DISCOUNT:
                             continue  # Well below bond range
-                        if stale_price > 0.95:
+                        if stale_price > config.BOND_MAX_ENTRY_PRICE:
                             continue  # Market resolved/spiked
 
                 # Optimization #4: WebSocket Orderbook Priority Over REST
                 # Always prioritize WS data when available and fresh (<30s old)
                 # Only fall back to REST if WS data is stale (>30s) or missing
                 # This reduces API calls and improves latency for price-sensitive operations
-                ob = get_orderbook(token_id, max_age=30)  # Tight freshness requirement for WS
+                ob = get_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)  # Tight freshness requirement for WS
                 if ob is not None:
                     ws_cache_hits += 1
-                if ob is None and rest_fetches < max_rest_fetches and (volume or 0) >= 1000:
+                if ob is None and rest_fetches < max_rest_fetches and (volume or 0) >= config.BOND_REST_FALLBACK_MIN_VOLUME:
                     # Fix #22: Parallel REST fetch moved to _get_orderbook_with_rest_fallback
                     ob = await _get_orderbook_with_rest_fallback(token_id)
                     rest_fetches += 1
@@ -398,7 +397,7 @@ async def scan_bond_candidates() -> list[dict]:
                 mid_price = ob.get("mid_price", 0)
                 synthetic_depth = False
                 if ask_depth == 0 and mid_price > 0:
-                    ask_depth = mid_price * config.BOND_LIQUIDITY_SCALE * 0.1
+                    ask_depth = mid_price * config.BOND_LIQUIDITY_SCALE * config.BOND_SYNTHETIC_DEPTH_FACTOR
                     synthetic_depth = True
 
                 # Calculate bid-side depth (exit liquidity)
@@ -425,7 +424,7 @@ async def scan_bond_candidates() -> list[dict]:
                 )
 
                 # Record in negative cache if score is near-zero
-                if opp_score < 1e-6:
+                if opp_score < config.BOND_NEGATIVE_CACHE_THRESHOLD:
                     _negative_cache[(market_id, token_id)] = _NegativeCacheEntry(
                         market_id=market_id,
                         token_id=token_id,
@@ -472,7 +471,7 @@ async def scan_bond_candidates() -> list[dict]:
 
     # Filter near-zero scores and sort by opportunity score descending
     # Optimization #1: Widened funnel - now filtering at score >= 1e-6 (previously implicit at BOND_MIN_SCORE)
-    candidates = [c for c in candidates if c["opportunity_score"] >= 1e-6]
+    candidates = [c for c in candidates if c["opportunity_score"] >= config.BOND_NEGATIVE_CACHE_THRESHOLD]
     candidates.sort(key=lambda c: c["opportunity_score"], reverse=True)
     
     # Log funnel stats for monitoring
@@ -495,7 +494,7 @@ async def scan_bond_candidates() -> list[dict]:
                   rest_fetches=rest_fetches, elapsed_s=_scan_elapsed)
 
     # Prune stale negative cache entries (>10 minutes old)
-    _prune_negative_cache(max_age_sec=600)
+    _prune_negative_cache(max_age_sec=config.BOND_NEGATIVE_CACHE_MAX_AGE)
 
     global _last_scan_stats, _last_scan_candidates
     _last_scan_stats = {
@@ -602,29 +601,36 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         return 0
 
     # Circuit breaker: halt if equity drops too far from peak
-    # Fix #19: Auto-reset when equity recovers
-    if equity > _peak_equity * 0.95:
-        # Recovery detected - reset peak to current equity
-        if equity > _peak_equity:
-            old_peak = _peak_equity
-            _peak_equity = equity
-            try:
-                await aexecute(
-                    "INSERT INTO bot_state (key, value, updated_at) VALUES ('peak_equity', ?, current_timestamp) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
-                    [str(_peak_equity)],
-                )
-                if old_peak > 0 and (equity - old_peak) / old_peak > 0.05:
-                    # Significant recovery - notify
-                    try:
-                        from alerts.notifier import send_imsg
-                        await send_imsg(
-                            f"CIRCUIT BREAKER RESET: Equity recovered to ${equity:.2f} "
-                            f"(+{((equity / old_peak - 1) * 100):.1f}% from prior peak). Trading resumed."
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+    # Fix #19: Auto-reset when equity recovers to BOND_HALT_RECOVERY_PCT of peak
+    if equity > _peak_equity:
+        # New peak — always update
+        old_peak = _peak_equity
+        _peak_equity = equity
+        try:
+            await aexecute(
+                "INSERT INTO bot_state (key, value, updated_at) VALUES ('peak_equity', ?, current_timestamp) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                [str(_peak_equity)],
+            )
+        except Exception:
+            pass
+    elif equity > _peak_equity * config.BOND_HALT_RECOVERY_PCT and equity < _peak_equity:
+        # Recovery: equity is above recovery threshold but below old peak.
+        # Reset peak to current equity so the drawdown breaker uses the
+        # recovered level as baseline, allowing trading to resume.
+        old_peak = _peak_equity
+        _peak_equity = equity
+        try:
+            await aexecute(
+                "INSERT INTO bot_state (key, value, updated_at) VALUES ('peak_equity', ?, current_timestamp) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                [str(_peak_equity)],
+            )
+            from alerts.notifier import send_imsg
+            await send_imsg(
+                f"CIRCUIT BREAKER RESET: Equity recovered to ${equity:.2f} "
+                f"({((equity / old_peak) * 100):.1f}% of prior peak ${old_peak:.2f}). Trading resumed."
+            )
+        except Exception:
+            pass
         
     if _peak_equity > config.BOND_HALT_MIN_EQUITY and equity < _peak_equity * (1.0 - config.BOND_HALT_DRAWDOWN_PCT):
         log.warning(
@@ -721,7 +727,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         now_utc = datetime.now(timezone.utc)
         for r in cooldown_rows:
             if r[2]:
-                last_ts = r[2].replace(tzinfo=timezone.utc) if r[2].tzinfo is None else r[2]
+                last_ts = ensure_utc(r[2])
                 secs = (now_utc - last_ts).total_seconds()
                 order_cooldowns[(r[0], r[1])] = secs
     except Exception:
@@ -773,7 +779,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         try:
             return await get_fee_rate(tid)
         except Exception:
-            return 200
+            return 200  # Conservative 2% fallback when API unreachable
 
     async def _safe_tick(tid: str) -> str:
         try:
@@ -841,7 +847,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         # Optimization #4: Require fresh WS data (<30s) for order placement
         # This ensures price-sensitive operations use the most current market data
         from feeds.clob_ws import get_orderbook as _get_live_ob
-        live_ob = _get_live_ob(token_id, max_age=30)  # WS primary, REST fallback disabled here
+        live_ob = _get_live_ob(token_id, max_age=config.BOND_OB_FRESH_AGE)  # WS primary, REST fallback disabled here
         best_bid = live_ob.get("best_bid", candidate["best_bid"]) if live_ob else candidate["best_bid"]
         best_ask = live_ob.get("best_ask", candidate["best_ask"]) if live_ob else candidate["best_ask"]
         if best_bid <= 0 or best_ask <= 0:
@@ -870,22 +876,33 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             and candidate.get("days_remaining", 999) <= config.BOND_TAKER_DAYS_THRESHOLD
         )
         if is_taker:
-            # Fix #14: always require fresh orderbook (<5s) for taker orders, skip if unavailable
-            fresh_ob = _get_live_ob(token_id, max_age=5)
+            # Require fresh orderbook for taker orders — fall back to REST if WS is stale
+            fresh_ob = _get_live_ob(token_id, max_age=config.BOND_TAKER_OB_MAX_AGE)
             if fresh_ob and fresh_ob.get("best_ask"):
                 order_price = fresh_ob["best_ask"]
             else:
-                log.debug("taker_skip_stale_ob", token_id=token_id[:16])
-                continue  # Skip candidate - don't guess at stale price
+                # WS data stale — try REST fallback for high-score taker candidates
+                try:
+                    from execution.clob_client import get_orderbook_rest
+                    rest_ob = await get_orderbook_rest(token_id)
+                    if rest_ob and rest_ob.get("best_ask"):
+                        order_price = rest_ob["best_ask"]
+                        log.debug("taker_rest_fallback", token_id=log_id(token_id), ask=order_price)
+                    else:
+                        log.debug("taker_skip_no_ob", token_id=log_id(token_id))
+                        continue
+                except Exception:
+                    log.debug("taker_skip_stale_ob", token_id=log_id(token_id))
+                    continue
 
         if order_price <= 0 or order_price >= 1:
             continue
 
         # Polymarket minimum is 5 shares — use execution price, not scan price
-        min_shares_usd = 5.0 * order_price
-        min_usd = max(min_shares_usd, 1.0)
+        min_shares_usd = config.POLYMARKET_MIN_SHARES * order_price
+        min_usd = max(min_shares_usd, config.BOND_MIN_ORDER_USD)
         if size_usd < min_usd:
-            if size_usd >= min_usd * 0.50:
+            if size_usd >= min_usd * config.BOND_MIN_ORDER_ROUND_UP_FACTOR:
                 size_usd = min_usd
             else:
                 continue
@@ -1024,7 +1041,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
 
             clob_order_id = order_result.get("id", "")
             if not clob_order_id:
-                log.warning("bond_order_no_id", market_id=market_id[:16],
+                log.warning("bond_order_no_id", market_id=log_id(market_id),
                             raw=str(order_result)[:200])
                 portfolio["cash"] += size_usd
                 portfolio["total_invested"] -= size_usd
@@ -1062,7 +1079,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
 
             log.info(
                 "bond_order_placed",
-                market_id=market_id[:16],
+                market_id=log_id(market_id),
                 outcome=candidate["outcome"],
                 price=order_price,
                 size_usd=f"{size_usd:.2f}",
@@ -1070,7 +1087,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             )
 
         except asyncio.TimeoutError:
-            log.error("bond_order_timeout", market_id=market_id[:16], token_id=token_id[:16])
+            log.error("bond_order_timeout", market_id=log_id(market_id), token_id=log_id(token_id))
             # Order may have been placed despite timeout — check exchange
             try:
                 from execution.clob_client import get_open_orders
@@ -1091,7 +1108,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
                         placed_order_ids.append(oo_id)
                         orders_placed += 1
                         log.info("timeout_order_recovered", clob_order_id=oo_id,
-                                 market_id=market_id[:16])
+                                 market_id=log_id(market_id))
                         break  # Only recover one order per candidate
                 else:
                     # No orphan found — order didn't make it
@@ -1105,7 +1122,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
                 portfolio["n_positions"] -= 1
 
         except Exception as exc:
-            log.error("bond_order_failed", market_id=market_id[:16], error=str(exc))
+            log.error("bond_order_failed", market_id=log_id(market_id), error=str(exc))
             portfolio["cash"] += size_usd
             portfolio["total_invested"] -= size_usd
             portfolio["n_positions"] -= 1

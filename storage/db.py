@@ -259,6 +259,8 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
      "ALTER TABLE markets ADD COLUMN event_title VARCHAR"),
     (10, "Add condition_id to bond_positions for on-chain redemption",
      "ALTER TABLE bond_positions ADD COLUMN condition_id VARCHAR"),
+    (11, "Add index on bond_orders.created_at for time-range queries",
+     "CREATE INDEX IF NOT EXISTS idx_bond_orders_created ON bond_orders(created_at)"),
 ]
 
 
@@ -334,7 +336,7 @@ def execute(sql: str, params: list | None = None) -> None:
 
 # -- Async helpers with timeout -----------------------------------------------
 
-_DB_TIMEOUT: float = 10.0
+_DB_TIMEOUT: float = config.DB_QUERY_TIMEOUT
 
 
 async def aexecute(sql: str, params: list | None = None) -> None:

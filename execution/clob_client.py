@@ -11,11 +11,12 @@ import time as _time
 from typing import Any
 
 import config
+from utils import log_id
 from utils.logger import get_logger
 
 log = get_logger("execution.clob_client")
 
-_CLOB_TIMEOUT = 30.0
+_CLOB_TIMEOUT = config.CLOB_API_TIMEOUT
 
 
 async def _to_thread_with_timeout(fn, *args, timeout=_CLOB_TIMEOUT):
@@ -51,9 +52,9 @@ def _get_client():
 
         _client = ClobClient(
             host=config.CLOB_API_HOST,
-            chain_id=137,  # Polygon mainnet
+            chain_id=config.POLYGON_CHAIN_ID,  # Polygon mainnet
             key=config.POLYMARKET_PRIVATE_KEY,
-            signature_type=0,  # EOA wallet
+            signature_type=config.CLOB_SIGNATURE_TYPE,  # EOA wallet
             funder=config.POLYMARKET_WALLET_ADDRESS or None,
             creds=ApiCreds(
                 api_key=config.POLYMARKET_API_KEY,
@@ -79,11 +80,11 @@ def _ensure_usdc_approval() -> None:
     """
     from web3 import Web3
 
-    USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-    CTF = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-    EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
-    NEG_RISK_EXCHANGE = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
-    NEG_RISK_ADAPTER = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+    USDC_E = config.POLYMARKET_USDC_E_ADDRESS
+    CTF = config.POLYMARKET_CTF_ADDRESS
+    EXCHANGE = config.POLYMARKET_EXCHANGE_ADDRESS
+    NEG_RISK_EXCHANGE = config.POLYMARKET_NEG_RISK_EXCHANGE_ADDRESS
+    NEG_RISK_ADAPTER = config.POLYMARKET_NEG_RISK_ADAPTER_ADDRESS
     MAX_INT = 2**256 - 1
 
     ERC20_ABI = [
@@ -115,13 +116,13 @@ def _ensure_usdc_approval() -> None:
             tx = usdc.functions.approve(spender_cs, MAX_INT).build_transaction({
                 "from": wallet,
                 "nonce": nonce,
-                "gas": 60_000,
+                "gas": config.APPROVAL_GAS_LIMIT,
                 "gasPrice": w3.eth.gas_price,
-                "chainId": 137,
+                "chainId": config.POLYGON_CHAIN_ID,
             })
             signed = w3.eth.account.sign_transaction(tx, config.POLYMARKET_PRIVATE_KEY)
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=config.TX_RECEIPT_TIMEOUT)
             if receipt["status"] != 1:
                 log.warning("usdc_approve_reverted", spender=spender[:10], tx=tx_hash.hex())
                 _nonce_valid = False
@@ -142,13 +143,13 @@ def _ensure_usdc_approval() -> None:
             tx = ctf.functions.setApprovalForAll(operator_cs, True).build_transaction({
                 "from": wallet,
                 "nonce": nonce,
-                "gas": 60_000,
+                "gas": config.APPROVAL_GAS_LIMIT,
                 "gasPrice": w3.eth.gas_price,
-                "chainId": 137,
+                "chainId": config.POLYGON_CHAIN_ID,
             })
             signed = w3.eth.account.sign_transaction(tx, config.POLYMARKET_PRIVATE_KEY)
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=config.TX_RECEIPT_TIMEOUT)
             if receipt["status"] != 1:
                 log.warning("ctf_approve_reverted", operator=operator[:10], tx=tx_hash.hex())
                 break
@@ -171,8 +172,8 @@ def _swap_native_usdc_to_usdc_e() -> float:
     from web3 import Web3
 
     USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-    USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-    PARASWAP_PROXY = "0x216B4B4ba9F3e719726886d34a177484278Bfcae"
+    USDC_E = config.POLYMARKET_USDC_E_ADDRESS
+    PARASWAP_PROXY = config.PARASWAP_PROXY_ADDRESS
 
     ERC20_ABI = [
         {"constant": True, "inputs": [{"name": "account", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}], "type": "function"},
@@ -186,7 +187,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
 
     usdc_n = w3.eth.contract(address=Web3.to_checksum_address(USDC_NATIVE), abi=ERC20_ABI)
     balance = usdc_n.functions.balanceOf(wallet).call()
-    if balance < 100_000:  # < $0.10 — not worth swapping
+    if balance < config.USDC_SWAP_MIN_AMOUNT:  # < $0.10 — not worth swapping
         return 0.0
 
     amount_usd = balance / 1e6
@@ -199,12 +200,12 @@ def _swap_native_usdc_to_usdc_e() -> float:
     if allowance < balance:
         nonce = w3.eth.get_transaction_count(wallet, "pending")
         approve_tx = usdc_n.functions.approve(proxy_cs, 2**256 - 1).build_transaction({
-            "from": wallet, "nonce": nonce, "gas": 60_000,
-            "gasPrice": w3.eth.gas_price, "chainId": 137,
+            "from": wallet, "nonce": nonce, "gas": config.APPROVAL_GAS_LIMIT,
+            "gasPrice": w3.eth.gas_price, "chainId": config.POLYGON_CHAIN_ID,
         })
         signed = w3.eth.account.sign_transaction(approve_tx, config.POLYMARKET_PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=config.TX_RECEIPT_TIMEOUT)
         if receipt["status"] != 1:
             log.warning("native_usdc_approve_failed", tx=tx_hash.hex())
             return 0.0
@@ -215,13 +216,13 @@ def _swap_native_usdc_to_usdc_e() -> float:
     pre_swap_bal = usdc_e_contract.functions.balanceOf(wallet).call() / 1e6
 
     # Step 2: Get fresh quote + build swap tx + submit — all back-to-back
-    max_attempts = 2
+    max_attempts = config.USDC_SWAP_MAX_ATTEMPTS
     for attempt in range(max_attempts):
         # Get price quote
         price_url = (
-            f"https://apiv5.paraswap.io/prices?"
+            f"{config.PARASWAP_API_BASE}/prices?"
             f"srcToken={USDC_NATIVE}&destToken={USDC_E}"
-            f"&amount={balance}&srcDecimals=6&destDecimals=6&side=SELL&network=137"
+            f"&amount={balance}&srcDecimals=6&destDecimals=6&side=SELL&network={config.POLYGON_CHAIN_ID}"
         )
         req = urllib.request.Request(price_url, headers={"Accept": "application/json"})
         resp = urllib.request.urlopen(req, timeout=15)
@@ -233,7 +234,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
         loss_pct = (1.0 - dest_amount / balance) * 100
         log.info("usdc_swap_quote", quote=f"${quote_usd:.4f}", loss=f"{loss_pct:.2f}%", attempt=attempt + 1)
 
-        if loss_pct > 2.0:
+        if loss_pct > config.USDC_SWAP_MAX_LOSS_PCT:
             log.warning("usdc_swap_too_expensive", loss=f"{loss_pct:.2f}%")
             return 0.0
 
@@ -244,11 +245,11 @@ def _swap_native_usdc_to_usdc_e() -> float:
             "srcAmount": str(balance),
             "priceRoute": price_route,
             "userAddress": wallet,
-            "slippage": 100,  # 1% max slippage (actual loss is ~0%)
+            "slippage": config.PARASWAP_MAX_SLIPPAGE_BPS,  # 1% max slippage (actual loss is ~0%)
             "ignoreChecks": True,
         }).encode()
         tx_req = urllib.request.Request(
-            "https://apiv5.paraswap.io/transactions/137?ignoreChecks=true",
+            f"{config.PARASWAP_API_BASE}/transactions/{config.POLYGON_CHAIN_ID}?ignoreChecks=true",
             data=tx_body, headers={"Content-Type": "application/json"},
         )
         tx_resp = urllib.request.urlopen(tx_req, timeout=15)
@@ -262,13 +263,13 @@ def _swap_native_usdc_to_usdc_e() -> float:
             "data": tx_data["data"],
             "value": int(tx_data.get("value", "0")),
             "nonce": nonce,
-            "gas": 500_000,
+            "gas": config.SWAP_GAS_LIMIT,
             "gasPrice": w3.eth.gas_price,
-            "chainId": 137,
+            "chainId": config.POLYGON_CHAIN_ID,
         }
         signed = w3.eth.account.sign_transaction(swap_tx, config.POLYMARKET_PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=config.TX_RECEIPT_TIMEOUT)
 
         if receipt["status"] == 1:
             post_swap_bal = usdc_e_contract.functions.balanceOf(wallet).call() / 1e6
@@ -281,7 +282,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
 
         log.warning("usdc_swap_reverted", tx=tx_hash.hex(), attempt=attempt + 1)
         if attempt < max_attempts - 1:
-            time.sleep(3)
+            time.sleep(config.USDC_SWAP_RETRY_DELAY)
 
     return 0.0
 
@@ -315,7 +316,7 @@ async def initialize() -> dict:
         balance = get_usdc_balance_sync()
         return {"balance": balance, "swapped": swapped}
 
-    result = await _to_thread_with_timeout(_init, timeout=60.0)
+    result = await _to_thread_with_timeout(_init, timeout=config.CLOB_INIT_TIMEOUT)
     log.info("clob_client_initialized", balance=result["balance"])
     if result.get("swapped", 0) > 0:
         try:
@@ -365,7 +366,7 @@ def get_usdc_balance_sync() -> float:
 
 
 _balance_cache: tuple[float, float] | None = None  # (balance, monotonic_ts)
-_BALANCE_CACHE_TTL = 30.0
+_BALANCE_CACHE_TTL = config.BALANCE_CACHE_TTL
 
 
 def invalidate_balance_cache() -> None:
@@ -378,7 +379,7 @@ def invalidate_balance_cache() -> None:
     _balance_cache = None
     # Apply haircut only once per invalidation cycle to avoid geometric decay
     if _last_good_balance is not None and _last_good_balance > 0 and not _balance_haircutted:
-        _last_good_balance *= 0.85  # Conservative 15% haircut
+        _last_good_balance *= config.BALANCE_HAIRCUT_FACTOR  # Conservative 15% haircut
         _balance_haircutted = True
 
 
@@ -424,7 +425,7 @@ async def get_onchain_balances() -> dict:
     """
     result = await _to_thread_with_timeout(get_onchain_balances_sync)
     # Fix #17: alert on low POL for gas
-    if result.get("pol", 0) < 0.05:
+    if result.get("pol", 0) < config.MIN_POL_GAS_BALANCE:
         log.error("insufficient_pol_for_gas", pol=result.get("pol", 0))
         try:
             from alerts.notifier import send_imsg
@@ -476,8 +477,8 @@ async def place_limit_buy(
 
         # Calculate shares from price and USD size
         shares = size_usd / price
-        if shares < 5.0:
-            raise ValueError(f"Order too small: {shares:.1f} shares (minimum 5)")
+        if shares < config.POLYMARKET_MIN_SHARES:
+            raise ValueError(f"Order too small: {shares:.1f} shares (minimum {config.POLYMARKET_MIN_SHARES})")
 
         order_args = OrderArgs(
             price=price,
@@ -501,7 +502,7 @@ async def place_limit_buy(
         order_info = _normalize_order_result(result)
         log.info(
             "order_placed",
-            token_id=token_id[:16],
+            token_id=log_id(token_id),
             price=price,
             size_usd=size_usd,
             post_only=post_only,
@@ -509,7 +510,7 @@ async def place_limit_buy(
         )
         return order_info
     except Exception as exc:
-        log.error("order_place_failed", token_id=token_id[:16], price=price, error=str(exc))
+        log.error("order_place_failed", token_id=log_id(token_id), price=price, error=str(exc))
         raise
 
 
@@ -555,7 +556,7 @@ async def get_tick_size(token_id: str) -> str:
     try:
         return await _to_thread_with_timeout(_get)
     except Exception as exc:
-        log.warning("tick_size_fallback", token_id=token_id[:16], error=str(exc))
+        log.warning("tick_size_fallback", token_id=log_id(token_id), error=str(exc))
         return "0.01"
 
 
@@ -568,9 +569,9 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
     def _redeem():
         from web3 import Web3
 
-        CTF = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-        NEG_RISK_ADAPTER = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
-        USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        CTF = config.POLYMARKET_CTF_ADDRESS
+        NEG_RISK_ADAPTER = config.POLYMARKET_NEG_RISK_ADAPTER_ADDRESS
+        USDC_E = config.POLYMARKET_USDC_E_ADDRESS
 
         CTF_REDEEM_ABI = [
             {
@@ -630,9 +631,9 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
             ).build_transaction({
                 "from": wallet,
                 "nonce": nonce,
-                "gas": 300_000,
+                "gas": config.REDEEM_GAS_LIMIT,
                 "gasPrice": gas_price,
-                "chainId": 137,
+                "chainId": config.POLYGON_CHAIN_ID,
             })
         else:
             contract = w3.eth.contract(
@@ -647,17 +648,17 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
             ).build_transaction({
                 "from": wallet,
                 "nonce": nonce,
-                "gas": 300_000,
+                "gas": config.REDEEM_GAS_LIMIT,
                 "gasPrice": gas_price,
-                "chainId": 137,
+                "chainId": config.POLYGON_CHAIN_ID,
             })
 
         signed = w3.eth.account.sign_transaction(tx, config.POLYMARKET_PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=config.TX_RECEIPT_TIMEOUT)
 
         if receipt["status"] != 1:
-            log.warning("redeem_reverted", condition_id=condition_id[:16], tx=tx_hash.hex())
+            log.warning("redeem_reverted", condition_id=log_id(condition_id), tx=tx_hash.hex())
             return None
 
         return tx_hash.hex()
@@ -665,11 +666,11 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
     try:
         result = await _to_thread_with_timeout(_redeem, timeout=30)
         if result:
-            log.info("positions_redeemed", condition_id=condition_id[:16], tx=result)
+            log.info("positions_redeemed", condition_id=log_id(condition_id), tx=result)
             invalidate_balance_cache()
         return result
     except Exception as exc:
-        log.warning("redeem_failed", condition_id=condition_id[:16], error=str(exc))
+        log.warning("redeem_failed", condition_id=log_id(condition_id), error=str(exc))
         return None
 
 
@@ -775,7 +776,7 @@ async def _heartbeat_loop() -> None:
     global _heartbeat_id, _heartbeat_consecutive_failures
     while True:
         try:
-            new_id = await _to_thread_with_timeout(_post_heartbeat_sync, _heartbeat_id, timeout=8.0)
+            new_id = await _to_thread_with_timeout(_post_heartbeat_sync, _heartbeat_id, timeout=config.HEARTBEAT_POST_TIMEOUT)
             if new_id:
                 _heartbeat_id = new_id
             _heartbeat_consecutive_failures = 0
@@ -814,7 +815,7 @@ async def _heartbeat_loop() -> None:
                 _heartbeat_consecutive_failures += 1
 
             # Fix #34: Alert after 3 consecutive failures (15s+) to reduce false positives
-            if _heartbeat_consecutive_failures == 3:
+            if _heartbeat_consecutive_failures == config.HEARTBEAT_ALERT_THRESHOLD:
                 try:
                     from alerts.notifier import send_imsg
                     await send_imsg(
@@ -871,8 +872,8 @@ async def place_limit_sell(
     from py_clob_client.order_builder.constants import SELL
     from py_clob_client.clob_types import OrderArgs, PartialCreateOrderOptions, OrderType
 
-    if shares < 5.0:
-        raise ValueError(f"Order too small: {shares:.1f} shares (minimum 5)")
+    if shares < config.POLYMARKET_MIN_SHARES:
+        raise ValueError(f"Order too small: {shares:.1f} shares (minimum {config.POLYMARKET_MIN_SHARES})")
 
     def _place():
         client = _get_client()
@@ -881,7 +882,7 @@ async def place_limit_sell(
             size=shares,
             side=SELL,
             token_id=token_id,
-            expiration=int(_time.time() + 3600),  # 1hr for exits
+            expiration=int(_time.time() + config.BOND_SELL_ORDER_TIMEOUT_SECS),  # 1hr for exits
         )
         options = PartialCreateOrderOptions(
             tick_size=tick_size,
@@ -895,14 +896,14 @@ async def place_limit_sell(
         order_info = _normalize_order_result(result)
         log.info(
             "sell_order_placed",
-            token_id=token_id[:16],
+            token_id=log_id(token_id),
             price=price,
             shares=shares,
             order_id=order_info.get("id", "?"),
         )
         return order_info
     except Exception as exc:
-        log.error("sell_order_failed", token_id=token_id[:16], price=price, error=str(exc))
+        log.error("sell_order_failed", token_id=log_id(token_id), price=price, error=str(exc))
         raise
 
 
@@ -944,13 +945,13 @@ async def place_market_sell(
         order_info = _normalize_order_result(result)
         log.info(
             "market_sell_placed",
-            token_id=token_id[:16],
+            token_id=log_id(token_id),
             shares=shares,
             order_id=order_info.get("id", "?"),
         )
         return order_info
     except Exception as exc:
-        log.error("market_sell_failed", token_id=token_id[:16], shares=shares, error=str(exc))
+        log.error("market_sell_failed", token_id=log_id(token_id), shares=shares, error=str(exc))
         raise
 
 
@@ -1021,7 +1022,7 @@ async def cancel_market_orders(market: str = "", asset_id: str = "") -> bool:
 
     try:
         await _to_thread_with_timeout(_cancel)
-        log.info("market_orders_cancelled", market=market[:16] if market else "", asset_id=asset_id[:16] if asset_id else "")
+        log.info("market_orders_cancelled", market=log_id(market), asset_id=log_id(asset_id))
         return True
     except Exception as exc:
         log.warning("market_orders_cancel_failed", error=str(exc))
@@ -1083,7 +1084,7 @@ async def place_limit_buys_batch(orders: list[dict]) -> list[dict]:
             )
         return client.post_orders(signed_orders)
 
-    return await _to_thread_with_timeout(_place, timeout=60.0)
+    return await _to_thread_with_timeout(_place, timeout=config.CLOB_BATCH_TIMEOUT)
 
 
 # ── REST orderbook ───────────────────────────────────────────
@@ -1122,5 +1123,5 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
             "ts": __import__("time").time(),
         }
     except Exception as exc:
-        log.debug("orderbook_rest_failed", token_id=token_id[:16], error=str(exc))
+        log.debug("orderbook_rest_failed", token_id=log_id(token_id), error=str(exc))
         return None

@@ -13,6 +13,8 @@ import orjson
 
 import config
 from storage.db import aquery, aexecute
+from utils import log_id
+from utils.datetime_helpers import ensure_utc
 from utils.logger import get_logger
 
 log = get_logger("order_manager")
@@ -81,7 +83,7 @@ async def _revert_exiting_if_no_sells(market_id: str, token_id: str) -> None:
                     "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE market_id = ? AND token_id = ? AND status = 'exiting'",
                     [market_id, token_id],
                 )
-                log.info("exiting_position_reverted", market_id=market_id[:16], token_id=token_id[:16])
+                log.info("exiting_position_reverted", market_id=log_id(market_id), token_id=log_id(token_id))
     except Exception as exc:
         log.debug("revert_exiting_check_failed", error=str(exc))
 
@@ -135,7 +137,7 @@ async def on_ws_trade(fill: dict) -> None:
                     side=order_side or "buy",
                 )
                 await _maybe_discard_token(token_id)
-                log.info("ws_bond_order_filled", order_id=order_id, market_id=market_id[:16],
+                log.info("ws_bond_order_filled", order_id=order_id, market_id=log_id(market_id),
                          price=fill_price, shares=actual_shares)
 
             elif new_status in ("cancelled", "expired", "dead"):
@@ -236,7 +238,7 @@ async def track_order_fills() -> None:
                     side=order_side or "buy",
                 )
 
-                log.info("bond_order_filled", order_id=order_id, market_id=market_id[:16],
+                log.info("bond_order_filled", order_id=order_id, market_id=log_id(market_id),
                          price=fill_price, shares=actual_shares)
 
             elif new_status in ("cancelled", "expired", "dead"):
@@ -398,10 +400,7 @@ async def _create_or_update_position(
     ann_yield = 0.0
     if end_date and fill_price > 0 and fill_price < 1:
         try:
-            if isinstance(end_date, str):
-                end_dt = datetime.fromisoformat(end_date.rstrip("Z")).replace(tzinfo=timezone.utc)
-            else:
-                end_dt = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
+            end_dt = ensure_utc(end_date)
             days_remaining = max(0.01, (end_dt - datetime.now(timezone.utc)).total_seconds() / 86400)
             effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
             raw_yield = (1.0 - fill_price) / fill_price
@@ -470,7 +469,7 @@ async def update_position_mtm() -> None:
         try:
             # Optimization #4: Use WS data with 60s max age (looser than entry/exit which use 30s)
             # MTM is less time-sensitive than order placement, so we tolerate slightly stale data
-            ob = get_orderbook(token_id, max_age=60)
+            ob = get_orderbook(token_id, max_age=config.BOND_MTM_OB_MAX_AGE)
             if ob is None:
                 continue
 
@@ -496,7 +495,7 @@ async def update_position_mtm() -> None:
 
             # Fix #12: position-level stop loss - hard cap at -20% from entry
             loss_pct = (entry_price - current_price) / entry_price if entry_price > 0 else 0
-            if loss_pct > 0.20:
+            if loss_pct > config.BOND_STOP_LOSS_PCT:
                 log.warning("bond_stop_loss_triggered", pos_id=pos_id, loss_pct=f"{loss_pct:.2%}",
                             entry=f"{entry_price:.3f}", current=f"{current_price:.3f}")
                 # Force immediate exit via edge check (set edge to trigger auto-exit)
@@ -520,12 +519,10 @@ async def update_position_mtm() -> None:
                 _exit_threshold = config.BOND_AUTO_EXIT_SEVERITY
                 if end_date:
                     try:
-                        _end_dt = end_date.replace(tzinfo=timezone.utc) if hasattr(end_date, 'replace') and end_date.tzinfo is None else end_date
-                        if isinstance(end_date, str):
-                            _end_dt = datetime.fromisoformat(end_date.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        _end_dt = ensure_utc(end_date)
                         _days_left = max(0, (_end_dt - datetime.now(timezone.utc)).total_seconds() / 86400)
                         _tight = config.BOND_AUTO_EXIT_SEVERITY_TIGHT
-                        _exit_threshold = _tight + (config.BOND_AUTO_EXIT_SEVERITY - _tight) * min(_days_left / 14.0, 1.0)
+                        _exit_threshold = _tight + (config.BOND_AUTO_EXIT_SEVERITY - _tight) * min(_days_left / config.BOND_EXIT_THRESHOLD_DAYS, 1.0)
                     except Exception:
                         pass
 
@@ -595,7 +592,7 @@ async def update_position_mtm() -> None:
                         log.warning("bond_auto_exit_failed", pos_id=pos_id, error=str(exit_exc))
 
                 # Send alert if significant (always, even if sell already exists)
-                if severity > 0.05:
+                if severity > config.BOND_SEVERITY_ALERT_THRESHOLD:
                     try:
                         from alerts.notifier import send_imsg
                         q = (question or "?")[:40]
@@ -705,7 +702,7 @@ async def check_resolutions() -> None:
             log.info(
                 "bond_resolved",
                 pos_id=pos_id,
-                market_id=market_id[:16],
+                market_id=log_id(market_id),
                 outcome=outcome,
                 market_outcome=market_outcome,
                 won=won,
@@ -780,7 +777,7 @@ async def check_resolutions() -> None:
                         "UPDATE bond_orders SET status = 'cancelled', updated_at = current_timestamp WHERE id = ?",
                         [order_id],
                     )
-                    log.info("stale_order_cancelled", order_id=order_id, market_id=market_id[:16])
+                    log.info("stale_order_cancelled", order_id=order_id, market_id=log_id(market_id))
                 except Exception as exc:
                     log.warning("stale_order_cancel_failed", order_id=order_id, error=str(exc))
     except Exception as exc:
@@ -857,7 +854,7 @@ async def snapshot_bond_equity() -> None:
 
         # Prune old equity rows to prevent unbounded growth
         from storage.db import prune_bond_equity
-        await prune_bond_equity(keep_days=90)
+        await prune_bond_equity(keep_days=config.BOND_EQUITY_RETENTION_DAYS)
     except Exception as exc:
         log.error("equity_snapshot_error", error=str(exc))
 
@@ -1026,7 +1023,7 @@ async def cleanup_stale_orders() -> None:
                 )
                 if order_side == "sell":
                     await _revert_exiting_if_no_sells(market_id, token_id)
-                log.info("stale_order_cleaned", order_id=order_id, market_id=market_id[:16] if market_id else "?")
+                log.info("stale_order_cleaned", order_id=order_id, market_id=log_id(market_id) if market_id else "?")
             except Exception as exc:
                 log.warning("stale_order_cleanup_failed", order_id=order_id, error=str(exc))
 
@@ -1138,7 +1135,7 @@ async def improve_stale_orders() -> None:
                     # Cancel succeeded but replacement failed — capital is freed on exchange
                     # DB already shows old order cancelled, which is correct
                     log.warning("order_improve_replace_failed", order_id=order_id,
-                                market_id=market_id[:16], error=str(place_exc))
+                                market_id=log_id(market_id), error=str(place_exc))
                     continue
 
                 new_clob_id = result.get("id", "")
@@ -1152,7 +1149,7 @@ async def improve_stale_orders() -> None:
                     )
                     _open_order_tokens.add(token_id)
                     log.info("order_price_improved", old_price=f"{price:.4f}", new_price=f"{new_price:.4f}",
-                             market_id=market_id[:16])
+                             market_id=log_id(market_id))
 
             except Exception as exc:
                 log.warning("order_improve_error", order_id=order_id, error=str(exc))
@@ -1179,11 +1176,11 @@ async def _recover_stranded_exiting() -> None:
     after a sell order expires or gets rejected."""
     try:
         stranded = await aquery(
-            """
+            f"""
             SELECT bp.id, bp.market_id, bp.token_id
             FROM bond_positions bp
             WHERE bp.status = 'exiting'
-              AND bp.updated_at < current_timestamp - INTERVAL '1 hour'
+              AND bp.updated_at < current_timestamp - INTERVAL '{config.BOND_STRANDED_EXIT_HOURS} hours'
               AND NOT EXISTS (
                   SELECT 1 FROM bond_orders bo
                   WHERE bo.market_id = bp.market_id AND bo.token_id = bp.token_id
@@ -1196,7 +1193,7 @@ async def _recover_stranded_exiting() -> None:
                 "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE id = ?",
                 [pos_id],
             )
-            log.info("stranded_exit_reverted", pos_id=pos_id, market_id=market_id[:16])
+            log.info("stranded_exit_reverted", pos_id=pos_id, market_id=log_id(market_id))
     except Exception as exc:
         log.warning("stranded_exit_recovery_error", error=str(exc))
 

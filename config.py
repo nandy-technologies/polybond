@@ -133,6 +133,115 @@ LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 # -- Orderbook data quality ---------------------------------------------------
 BOND_OB_MAX_AGE: float = float(os.getenv("BOND_OB_MAX_AGE", "300"))
 
+# -- CLOB client ---------------------------------------------------------------
+CLOB_API_TIMEOUT: float = float(os.getenv("CLOB_API_TIMEOUT", "30.0"))
+POLYGON_CHAIN_ID: int = int(os.getenv("POLYGON_CHAIN_ID", "137"))
+CLOB_SIGNATURE_TYPE: int = int(os.getenv("CLOB_SIGNATURE_TYPE", "0"))
+APPROVAL_GAS_LIMIT: int = int(os.getenv("APPROVAL_GAS_LIMIT", "60000"))
+SWAP_GAS_LIMIT: int = int(os.getenv("SWAP_GAS_LIMIT", "500000"))
+REDEEM_GAS_LIMIT: int = int(os.getenv("REDEEM_GAS_LIMIT", "300000"))
+CLOB_BATCH_TIMEOUT: float = float(os.getenv("CLOB_BATCH_TIMEOUT", "60.0"))
+CLOB_INIT_TIMEOUT: float = float(os.getenv("CLOB_INIT_TIMEOUT", "60.0"))
+TX_RECEIPT_TIMEOUT: int = int(os.getenv("TX_RECEIPT_TIMEOUT", "120"))
+HEARTBEAT_POST_TIMEOUT: float = float(os.getenv("HEARTBEAT_POST_TIMEOUT", "8.0"))
+HEARTBEAT_ALERT_THRESHOLD: int = int(os.getenv("HEARTBEAT_ALERT_THRESHOLD", "3"))
+HEARTBEAT_STOP_TIMEOUT: float = float(os.getenv("HEARTBEAT_STOP_TIMEOUT", "5.0"))
+
+# -- Contract addresses (Polygon mainnet) --------------------------------------
+POLYMARKET_USDC_E_ADDRESS: str = os.getenv("POLYMARKET_USDC_E_ADDRESS", "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+POLYMARKET_CTF_ADDRESS: str = os.getenv("POLYMARKET_CTF_ADDRESS", "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
+POLYMARKET_EXCHANGE_ADDRESS: str = os.getenv("POLYMARKET_EXCHANGE_ADDRESS", "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
+POLYMARKET_NEG_RISK_EXCHANGE_ADDRESS: str = os.getenv("POLYMARKET_NEG_RISK_EXCHANGE_ADDRESS", "0xC5d563A36AE78145C45a50134d48A1215220f80a")
+POLYMARKET_NEG_RISK_ADAPTER_ADDRESS: str = os.getenv("POLYMARKET_NEG_RISK_ADAPTER_ADDRESS", "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
+PARASWAP_PROXY_ADDRESS: str = os.getenv("PARASWAP_PROXY_ADDRESS", "0x216B4B4ba9F3e719726886d34a177484278Bfcae")
+PARASWAP_API_BASE: str = os.getenv("PARASWAP_API_BASE", "https://apiv5.paraswap.io")
+
+# -- USDC swap parameters ------------------------------------------------------
+USDC_SWAP_MIN_AMOUNT: int = int(os.getenv("USDC_SWAP_MIN_AMOUNT", "100000"))
+PARASWAP_MAX_SLIPPAGE_BPS: int = int(os.getenv("PARASWAP_MAX_SLIPPAGE_BPS", "100"))
+USDC_SWAP_MAX_LOSS_PCT: float = float(os.getenv("USDC_SWAP_MAX_LOSS_PCT", "2.0"))
+USDC_SWAP_MAX_ATTEMPTS: int = int(os.getenv("USDC_SWAP_MAX_ATTEMPTS", "2"))
+USDC_SWAP_RETRY_DELAY: float = float(os.getenv("USDC_SWAP_RETRY_DELAY", "3.0"))
+
+# -- Balance cache --------------------------------------------------------------
+BALANCE_CACHE_TTL: float = float(os.getenv("BALANCE_CACHE_TTL", "30.0"))
+BALANCE_HAIRCUT_FACTOR: float = float(os.getenv("BALANCE_HAIRCUT_FACTOR", "0.85"))
+
+# -- Order parameters -----------------------------------------------------------
+BOND_SELL_ORDER_TIMEOUT_SECS: int = int(os.getenv("BOND_SELL_ORDER_TIMEOUT_SECS", "3600"))
+POLYMARKET_MIN_SHARES: float = float(os.getenv("POLYMARKET_MIN_SHARES", "5.0"))
+MIN_POL_GAS_BALANCE: float = float(os.getenv("MIN_POL_GAS_BALANCE", "0.05"))
+
+# -- WebSocket parameters -------------------------------------------------------
+WS_MAX_SUBSCRIPTIONS: int = int(os.getenv("WS_MAX_SUBSCRIPTIONS", "500"))
+WS_BACKOFF_BASE: float = float(os.getenv("WS_BACKOFF_BASE", "1.0"))
+WS_BACKOFF_MAX: float = float(os.getenv("WS_BACKOFF_MAX", "60.0"))
+WS_BACKOFF_FACTOR: float = float(os.getenv("WS_BACKOFF_FACTOR", "2.0"))
+WS_MAX_MESSAGE_SIZE: int = int(os.getenv("WS_MAX_MESSAGE_SIZE", str(2**22)))
+WS_PING_INTERVAL: int = int(os.getenv("WS_PING_INTERVAL", "20"))
+WS_PING_TIMEOUT: int = int(os.getenv("WS_PING_TIMEOUT", "10"))
+WS_CLOSE_TIMEOUT: int = int(os.getenv("WS_CLOSE_TIMEOUT", "5"))
+WS_AUTO_SUBSCRIBE_LIMIT: int = int(os.getenv("WS_AUTO_SUBSCRIBE_LIMIT", "200"))
+WS_HEALTH_MAX_AGE: float = float(os.getenv("WS_HEALTH_MAX_AGE", "300.0"))
+WS_PRUNE_BATCH_SIZE: int = int(os.getenv("WS_PRUNE_BATCH_SIZE", "100"))
+
+# -- Bond scanner parameters ----------------------------------------------------
+BOND_KELLY_PRIOR_DECAY_TRADES: float = float(os.getenv("BOND_KELLY_PRIOR_DECAY_TRADES", "50.0"))
+BOND_REST_FALLBACK_MIN_VOLUME: float = float(os.getenv("BOND_REST_FALLBACK_MIN_VOLUME", "1000"))
+BOND_OB_FRESH_AGE: float = float(os.getenv("BOND_OB_FRESH_AGE", "30"))
+BOND_PREFILTER_DISCOUNT: float = float(os.getenv("BOND_PREFILTER_DISCOUNT", "0.94"))
+BOND_MAX_ENTRY_PRICE: float = float(os.getenv("BOND_MAX_ENTRY_PRICE", "0.95"))
+BOND_SYNTHETIC_DEPTH_FACTOR: float = float(os.getenv("BOND_SYNTHETIC_DEPTH_FACTOR", "0.1"))
+BOND_NEGATIVE_CACHE_THRESHOLD: float = float(os.getenv("BOND_NEGATIVE_CACHE_THRESHOLD", "1e-6"))
+BOND_NEGATIVE_CACHE_MAX_AGE: float = float(os.getenv("BOND_NEGATIVE_CACHE_MAX_AGE", "600"))
+BOND_MIN_ORDER_USD: float = float(os.getenv("BOND_MIN_ORDER_USD", "1.0"))
+BOND_MIN_ORDER_ROUND_UP_FACTOR: float = float(os.getenv("BOND_MIN_ORDER_ROUND_UP_FACTOR", "0.50"))
+BOND_DEFAULT_FEE_BPS: int = int(os.getenv("BOND_DEFAULT_FEE_BPS", "20"))
+BOND_SCORING_MIN_FLOOR: float = float(os.getenv("BOND_SCORING_MIN_FLOOR", "0.05"))
+BOND_TAKER_OB_MAX_AGE: float = float(os.getenv("BOND_TAKER_OB_MAX_AGE", "5"))
+
+# -- Order manager parameters ---------------------------------------------------
+BOND_STOP_LOSS_PCT: float = float(os.getenv("BOND_STOP_LOSS_PCT", "0.20"))
+BOND_EXIT_THRESHOLD_DAYS: float = float(os.getenv("BOND_EXIT_THRESHOLD_DAYS", "14.0"))
+BOND_SEVERITY_ALERT_THRESHOLD: float = float(os.getenv("BOND_SEVERITY_ALERT_THRESHOLD", "0.05"))
+BOND_STRANDED_EXIT_HOURS: int = int(os.getenv("BOND_STRANDED_EXIT_HOURS", "1"))
+BOND_MTM_OB_MAX_AGE: float = float(os.getenv("BOND_MTM_OB_MAX_AGE", "60"))
+BOND_EQUITY_RETENTION_DAYS: int = int(os.getenv("BOND_EQUITY_RETENTION_DAYS", "90"))
+BOND_HALT_RECOVERY_PCT: float = float(os.getenv("BOND_HALT_RECOVERY_PCT", "0.95"))
+
+# -- Gamma API ------------------------------------------------------------------
+GAMMA_API_TIMEOUT: float = float(os.getenv("GAMMA_API_TIMEOUT", "30"))
+GAMMA_API_CONNECT_TIMEOUT: float = float(os.getenv("GAMMA_API_CONNECT_TIMEOUT", "10"))
+GAMMA_API_RETRIES: int = int(os.getenv("GAMMA_API_RETRIES", "3"))
+GAMMA_API_BACKOFF_BASE: float = float(os.getenv("GAMMA_API_BACKOFF_BASE", "1.0"))
+BOND_POSITION_SYNC_TTL: float = float(os.getenv("BOND_POSITION_SYNC_TTL", "3600.0"))
+MARKET_CACHE_TTL: int = int(os.getenv("MARKET_CACHE_TTL", "3600"))
+
+# -- Alerts ---------------------------------------------------------------------
+ALERT_MIN_INTERVAL: float = float(os.getenv("ALERT_MIN_INTERVAL", "5.0"))
+ALERT_DEDUP_WINDOW: float = float(os.getenv("ALERT_DEDUP_WINDOW", "300.0"))
+ALERT_SEND_TIMEOUT: float = float(os.getenv("ALERT_SEND_TIMEOUT", "10.0"))
+
+# -- Backup ---------------------------------------------------------------------
+BACKUP_MAX_COUNT: int = int(os.getenv("BACKUP_MAX_COUNT", "12"))
+BACKUP_INTERVAL_SECS: int = int(os.getenv("BACKUP_INTERVAL_SECS", "1800"))
+
+# -- Database -------------------------------------------------------------------
+DB_QUERY_TIMEOUT: float = float(os.getenv("DB_QUERY_TIMEOUT", "10.0"))
+REDIS_HEALTH_CHECK_INTERVAL: int = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
+
+# -- Main loop intervals --------------------------------------------------------
+MARKET_SYNC_INTERVAL: int = int(os.getenv("MARKET_SYNC_INTERVAL", "120"))
+WS_PRUNE_SYNC_CYCLES: int = int(os.getenv("WS_PRUNE_SYNC_CYCLES", "5"))
+POSITION_RESYNC_CYCLES: int = int(os.getenv("POSITION_RESYNC_CYCLES", "10"))
+HEALTH_CHECK_INTERVAL: int = int(os.getenv("HEALTH_CHECK_INTERVAL", "30"))
+BACKUP_LOOP_INTERVAL: int = int(os.getenv("BACKUP_LOOP_INTERVAL", "300"))
+BOND_ORDER_POLL_INTERVAL: int = int(os.getenv("BOND_ORDER_POLL_INTERVAL", "60"))
+BOND_RESOLUTION_POLL_INTERVAL: int = int(os.getenv("BOND_RESOLUTION_POLL_INTERVAL", "60"))
+DOMAIN_WATCH_INTERVAL: int = int(os.getenv("DOMAIN_WATCH_INTERVAL", "600"))
+BOND_SCAN_JITTER: float = float(os.getenv("BOND_SCAN_JITTER", "30"))
+TASK_MONITOR_INTERVAL: int = int(os.getenv("TASK_MONITOR_INTERVAL", "60"))
+
 # -- Domain watchlist ---------------------------------------------------------
 DOMAIN_WATCH_ENABLED: bool = os.getenv("DOMAIN_WATCH_ENABLED", "true").lower() == "true"
 DOMAIN_EWMA_HALFLIFE: float = float(os.getenv("DOMAIN_EWMA_HALFLIFE", "24.0"))
@@ -140,12 +249,17 @@ DOMAIN_ALERT_Z_SCALE: float = float(os.getenv("DOMAIN_ALERT_Z_SCALE", "2.0"))
 DOMAIN_VOLUME_SCALE: float = float(os.getenv("DOMAIN_VOLUME_SCALE", "50000"))
 DOMAIN_ALERT_COOLDOWN_TAU: float = float(os.getenv("DOMAIN_ALERT_COOLDOWN_TAU", "14400"))
 
+# -- Domain watch ---------------------------------------------------------------
+DOMAIN_ALERT_PRIORITY_THRESHOLD: float = float(os.getenv("DOMAIN_ALERT_PRIORITY_THRESHOLD", "0.3"))
+DOMAIN_EWMA_INIT_VAR_SCALE: float = float(os.getenv("DOMAIN_EWMA_INIT_VAR_SCALE", "0.04"))
+DOMAIN_EWMA_MIN_INIT_VAR: float = float(os.getenv("DOMAIN_EWMA_MIN_INIT_VAR", "0.01"))
+
 # -- Heartbeat (Polymarket protocol constants) --------------------------------
-HEARTBEAT_INTERVAL_SEC: int = 5
-HEARTBEAT_TIMEOUT_SEC: int = 10
+HEARTBEAT_INTERVAL_SEC: int = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "5"))
+HEARTBEAT_TIMEOUT_SEC: int = int(os.getenv("HEARTBEAT_TIMEOUT_SEC", "10"))
 
 # -- Order reconciliation -----------------------------------------------------
-BOND_RECONCILE_CYCLES: int = 5
+BOND_RECONCILE_CYCLES: int = int(os.getenv("BOND_RECONCILE_CYCLES", "5"))
 
 # -- Fallback defaults --------------------------------------------------------
-BOND_DEFAULT_DAYS_REMAINING: float = 30.0
+BOND_DEFAULT_DAYS_REMAINING: float = float(os.getenv("BOND_DEFAULT_DAYS_REMAINING", "30.0"))

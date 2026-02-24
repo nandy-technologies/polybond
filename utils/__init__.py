@@ -3,6 +3,11 @@
 from datetime import datetime
 
 
+def log_id(id_str: str, length: int = 16) -> str:
+    """Truncate an ID for log output."""
+    return id_str[:length] if id_str else ""
+
+
 def to_epoch(ts) -> float:
     """Convert various timestamp formats (str, float, int, datetime) to Unix epoch float.
 
@@ -12,7 +17,7 @@ def to_epoch(ts) -> float:
     if ts is None:
         return float("inf")
     if isinstance(ts, (int, float)):
-        return float(ts)
+        return ts / 1000 if ts > 1e12 else float(ts)
     if isinstance(ts, datetime):
         return ts.timestamp()
     if isinstance(ts, str):

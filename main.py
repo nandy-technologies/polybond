@@ -1,4 +1,4 @@
-"""Entry point — orchestrate all feeds, scoring, discovery, dashboard, and paper trading."""
+"""Polybond Bot — bond trading + domain watchlist on Polymarket."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ import asyncio
 import signal
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config
@@ -20,478 +18,407 @@ from storage import cache
 
 log = get_logger("main")
 
-# ── Graceful shutdown ─────────────────────────────────────────
+_shutdown_event: asyncio.Event | None = None
+_PID_FILE = Path(__file__).resolve().parent / "data" / "polymarket-bot.pid"
 
-_shutdown_event = asyncio.Event()
+
+def _check_pid_file() -> None:
+    """Prevent double-launch by checking for an existing PID file."""
+    import os
+    if _PID_FILE.exists():
+        try:
+            old_pid = int(_PID_FILE.read_text().strip())
+            # Check if that process is still running
+            os.kill(old_pid, 0)
+            print(f"ERROR: Bot already running (PID {old_pid}). Remove {_PID_FILE} if stale.", file=sys.stderr)
+            sys.exit(1)
+        except (ProcessLookupError, ValueError):
+            pass  # stale PID file, safe to overwrite
+        except PermissionError:
+            print(f"ERROR: Process {old_pid} exists but not owned by us.", file=sys.stderr)
+            sys.exit(1)
+    _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PID_FILE.write_text(str(os.getpid()))
+
+
+def _remove_pid_file() -> None:
+    """Remove PID file on shutdown."""
+    try:
+        _PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _handle_signal(sig: signal.Signals) -> None:
     log.info("shutdown_requested", signal=sig.name)
-    _shutdown_event.set()
+    if _shutdown_event is not None:
+        _shutdown_event.set()
 
 
-# ── Feed runners (wrapped for graceful degradation) ───────────
+# -- Feed runners -------------------------------------------------------------
 
-async def _run_clob_ws(on_trade) -> None:
+async def _run_clob_ws_orderbooks() -> None:
+    """Run CLOB WS for orderbook data (bond candidate pricing)."""
     from feeds.clob_ws import run as clob_run
-    try:
-        await clob_run(on_trade=on_trade)
-    except asyncio.CancelledError:
-        log.info("clob_ws_stopped")
-    except Exception as exc:
-        log.error("clob_ws_fatal", error=str(exc))
-
-
-async def _run_x_stream(on_wallet) -> None:
-    from feeds.x_stream import run as x_run
-    if not config.X_BEARER_TOKEN:
-        log.warning("x_stream_disabled", reason="no bearer token")
-        return
-    try:
-        await x_run(on_wallet=on_wallet)
-    except asyncio.CancelledError:
-        log.info("x_stream_stopped")
-    except Exception as exc:
-        log.error("x_stream_fatal", error=str(exc))
-
-
-async def _run_discovery() -> None:
-    from discovery.scanner import run_discovery_loop
-    try:
-        await run_discovery_loop(interval=300)
-    except asyncio.CancelledError:
-        log.info("discovery_stopped")
-    except Exception as exc:
-        log.error("discovery_fatal", error=str(exc))
-
-
-async def _run_binance_ws() -> None:
-    from feeds.binance_ws import run as binance_run
-    try:
-        await binance_run(on_price_update=None)
-    except asyncio.CancelledError:
-        log.info("binance_ws_stopped")
-    except Exception as exc:
-        log.error("binance_ws_fatal", error=str(exc))
-
-
-async def _run_dashboard() -> None:
-    from dashboard.server import run_dashboard
-    try:
-        await run_dashboard()
-    except asyncio.CancelledError:
-        log.info("dashboard_stopped")
-    except Exception as exc:
-        log.error("dashboard_fatal", error=str(exc))
+    from execution.order_manager import on_ws_trade
+    while not _shutdown_event.is_set():
+        try:
+            await clob_run(on_trade=on_ws_trade)
+        except asyncio.CancelledError:
+            log.info("clob_ws_stopped")
+            return
+        except Exception as exc:
+            log.error("clob_ws_fatal", error=str(exc))
+            await asyncio.sleep(10)
 
 
 async def _run_market_sync() -> None:
-    from feeds.gamma_api import sync_top_markets
+    from feeds.gamma_api import sync_top_markets, sync_position_markets
+    _sync_count = 0
     while not _shutdown_event.is_set():
         try:
-            # Changed from sync_markets() (which fetched ALL 430k markets)
-            # Now syncs only top 1000 by volume every 10 minutes
-            count = await sync_top_markets(limit=1000)
+            count = await sync_top_markets()
             log.info("markets_synced", count=count)
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             log.warning("market_sync_error", error=str(exc))
+        # Prune stale WS subscriptions every 5 sync cycles (~10 min)
+        _sync_count += 1
+        if _sync_count % config.WS_PRUNE_SYNC_CYCLES == 0:
+            try:
+                from feeds.clob_ws import prune_stale_subscriptions
+                await prune_stale_subscriptions()
+            except Exception:
+                pass
+        # Re-sync markets for open positions every 10 cycles (~20 min)
+        if _sync_count % config.POSITION_RESYNC_CYCLES == 0:
+            try:
+                await sync_position_markets()
+            except Exception as exc:
+                log.debug("position_market_sync_error", error=str(exc))
         try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=600)
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.MARKET_SYNC_INTERVAL)
             break
         except asyncio.TimeoutError:
             pass
 
 
-async def _run_activity_poller() -> None:
-    """Poll Data API for trades with wallet addresses (CLOB WS doesn't have them)."""
-    from feeds import activity_poller
-    
-    # Register callback to trigger signal generation for discovered trades
-    activity_poller.register_trade_callback(on_large_trade)
-    
-    try:
-        await activity_poller.run_polling_loop(interval=30)
-    except asyncio.CancelledError:
-        log.info("activity_poller_stopped")
-    except Exception as exc:
-        log.error("activity_poller_fatal", error=str(exc))
+async def _run_dashboard() -> None:
+    from dashboard.server import run_dashboard
+    while not _shutdown_event.is_set():
+        try:
+            await run_dashboard()
+        except asyncio.CancelledError:
+            log.info("dashboard_stopped")
+            return
+        except Exception as exc:
+            log.error("dashboard_fatal", error=str(exc))
+            await asyncio.sleep(10)
+
+
+_prev_health_status: Status | None = None
 
 
 async def _run_health_loop() -> None:
+    global _prev_health_status
     while not _shutdown_event.is_set():
         try:
             await health_monitor.check_all()
             status = health_monitor.overall
             if status != Status.OK:
                 log.warning("system_degraded", health=health_monitor.snapshot())
+            # Alert on state transitions (OK→degraded, degraded→down, etc.)
+            if _prev_health_status is not None and status != _prev_health_status:
+                if status != Status.OK:
+                    try:
+                        from alerts.notifier import send_imsg
+                        snapshot = health_monitor.snapshot()
+                        bad = [k for k, v in snapshot.items() if v["status"] != "ok"]
+                        await send_imsg(f"HEALTH ALERT: {status.value} — {', '.join(bad)} degraded/down")
+                    except Exception:
+                        pass
+            _prev_health_status = status
         except Exception as exc:
             log.error("health_loop_error", error=str(exc))
         try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=30)
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.HEALTH_CHECK_INTERVAL)
             break
         except asyncio.TimeoutError:
             pass
 
 
-async def _run_resolution_processor() -> None:
+async def _run_backup_loop() -> None:
+    from storage.backup import maybe_backup
     while not _shutdown_event.is_set():
         try:
-            await process_resolutions()
+            await asyncio.to_thread(maybe_backup)
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
-            log.error("resolution_error", error=str(exc))
+            log.error("backup_loop_error", error=str(exc))
         try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=300)
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.BACKUP_LOOP_INTERVAL)
             break
         except asyncio.TimeoutError:
             pass
 
 
-async def _run_cluster_analysis() -> None:
-    from alerts.notifier import alert_on_cluster
-    from scoring.cluster import run_cluster_analysis
-    while not _shutdown_event.is_set():
-        try:
-            clusters = await run_cluster_analysis()
-        except Exception as exc:
-            log.error("cluster_analysis_error", error=str(exc))
-            clusters = []
-        for cluster in clusters:
-            if cluster.get("confidence", 0) >= 0.5:
-                try:
-                    await alert_on_cluster(cluster)
-                except Exception:
-                    pass
-        if clusters:
-            log.info("cluster_analysis_done", count=len(clusters))
-        try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=1800)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-
-async def _run_honeypot_scan() -> None:
-    from scoring.honeypot import scan_all_wallets
-    while not _shutdown_event.is_set():
-        try:
-            results = await scan_all_wallets()
-            flagged = sum(1 for r in results if r.get("risk", 0) >= 0.5)
-            log.info("honeypot_scan_done", scanned=len(results), flagged=flagged)
-        except Exception as exc:
-            log.error("honeypot_scan_error", error=str(exc))
-        try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=3600)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-
-# ── Phase 2: Paper trading loops ─────────────────────────────
-
-async def _run_paper_position_manager() -> None:
-    """Periodically update mark-to-market, close expired/resolved positions."""
-    from paper_trading.engine import (
-        update_mark_to_market, close_expired_positions,
-        close_resolved_positions, snapshot_equity,
-        close_stoploss_takeprofit,
-    )
-
-    snapshot_counter = 0  # snapshot equity every 12 iterations (= 1 hour at 5min intervals)
-
-    while not _shutdown_event.is_set():
-        try:
-            await update_mark_to_market()
-            await close_stoploss_takeprofit()
-            await close_expired_positions()
-            await close_resolved_positions()
-
-            snapshot_counter += 1
-            if snapshot_counter >= 12:
-                await snapshot_equity()
-                snapshot_counter = 0
-
-        except Exception as exc:
-            log.error("paper_position_error", error=str(exc))
-
-        try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=300)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-
-async def _run_tuner() -> None:
-    """Run threshold tuning every 6 hours."""
-    from paper_trading.tuner import run_tuning
-
-    while not _shutdown_event.is_set():
-        try:
-            results = await run_tuning()
-            if results:
-                log.info("tuning_done", best_sharpe=results[0]["sharpe"])
-        except Exception as exc:
-            log.error("tuner_error", error=str(exc))
-        try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=21600)  # 6 hours
-            break
-        except asyncio.TimeoutError:
-            pass
-
-
-async def _run_daily_summary() -> None:
-    """Send daily summary at 9 AM ET."""
-    from alerts.notifier import send_daily_summary
-    import zoneinfo
-
-    et = zoneinfo.ZoneInfo("America/New_York")
-
-    while not _shutdown_event.is_set():
-        now = datetime.now(et)
-        # Calculate seconds until next 9 AM ET
-        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-        if now >= target:
-            from datetime import timedelta
-            target += timedelta(days=1)
-        wait_seconds = (target - now).total_seconds()
-
-        log.info("daily_summary_scheduled", next_at=target.isoformat(), wait_hours=f"{wait_seconds/3600:.1f}")
-
-        try:
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=wait_seconds)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-        # Time to send!
-        try:
-            await send_daily_summary()
-            log.info("daily_summary_sent")
-        except Exception as exc:
-            log.error("daily_summary_error", error=str(exc))
-
-
-# ── Resolution processing ────────────────────────────────────
-
-async def process_resolutions() -> None:
-    from scoring.elo import process_resolved_bet
-    from scoring.alpha import update_wallet_alpha
-    from storage.db import query, execute
-
-    rows = await asyncio.to_thread(query, "SELECT id, outcome FROM markets WHERE outcome IS NOT NULL AND processed_at IS NULL")
-    for market_id, market_outcome in rows:
-        pos_rows = await asyncio.to_thread(query, "SELECT wallet, outcome, shares, avg_price FROM positions WHERE market_id = ?", [market_id])
-        for wallet, pos_outcome, shares, avg_price in pos_rows:
-            try:
-                won = (pos_outcome == market_outcome)
-                actual = 1.0 if won else 0.0
-                size = (shares or 0.0) * (avg_price or 0.0)
-                # Use size=1.0 as floor so trades with missing size data still update alpha
-                effective_size = max(size, 1.0)
-                await process_resolved_bet(wallet, market_id, won)
-                await update_wallet_alpha(wallet, market_id, avg_price or 0.0, actual, effective_size)
-            except Exception as exc:
-                log.warning("resolution_wallet_error", wallet=wallet, market=market_id, error=str(exc))
-        await asyncio.to_thread(execute, "UPDATE markets SET processed_at = current_timestamp WHERE id = ?", [market_id])
-    log.info("resolutions_processed", count=len(rows))
-
-
-# ── Trade callback (Phase 2 enhanced) ────────────────────────
-
-async def on_large_trade(trade: dict) -> None:
-    """Called when CLOB WS sees a large trade. Phase 2: score + paper trade + alert."""
-    from discovery.watchlist import add_wallet
-    from alerts.notifier import alert_on_trade, alert_on_signal
-    from dashboard.server import _broadcast_trade, broadcast_signal
-    from storage import cache as c
-
-    ws_receive_time = time.monotonic()
-
-    # Push to SSE live feed
-    _broadcast_trade(trade)
-
-    wallet = trade.get("wallet", "")
-    if not wallet:
+async def _run_bond_scanner() -> None:
+    if not config.BOND_ENABLED:
+        log.info("bond_scanner_disabled")
         return
-
-    usd_value = trade.get("usd_value", 0)
-    if usd_value < config.LARGE_TRADE_THRESHOLD:
-        return
-
-    # Auto-add to watchlist
-    await add_wallet(wallet, source="clob_large_trade")
-
-    # Check wallet score
-    score = await c.get_wallet_score(wallet)
-    elo = 1500.0
-    alpha = 0.0
-    if score:
-        elo = score.get("elo", 1500)
-        alpha = score.get("alpha", 0)
-        # Phase 1 trade alert (high Elo/Alpha)
-        await alert_on_trade(wallet=wallet, elo=elo, alpha=alpha, trade=trade)
-
-    # ── Phase 2: Signal scoring + paper trading ──────────
-    price = trade.get("price", 0)
-    side = trade.get("side", "BUY")
-    market_id = trade.get("market_id", "")
-
-    if 0.01 < price < 0.99 and market_id:
+    from strategies.bond_scanner import load_bond_stats, run_bond_scan_once
+    await load_bond_stats()
+    while not _shutdown_event.is_set():
         try:
-            from paper_trading.signal import score_trade, Tier
-            from paper_trading.engine import open_paper_trade
-            from paper_trading.latency import record_latency
-
-            signal = await score_trade(
-                wallet=wallet,
-                market_id=market_id,
-                direction=side,
-                price=price,
-                ws_receive_time=ws_receive_time,
-            )
-
-            if signal:
-                signal_gen_time = time.monotonic()
-
-                # Broadcast to SSE
-                broadcast_signal({
-                    "wallet": signal.wallet,
-                    "market_id": signal.market_id,
-                    "market_question": signal.market_question,
-                    "direction": signal.direction,
-                    "confidence_score": signal.confidence_score,
-                    "tier": signal.tier,
-                    "ts": signal.timestamp.isoformat(),
-                })
-
-                # Paper trade for HIGH and MEDIUM
-                if signal.tier in (Tier.HIGH, Tier.MEDIUM):
-                    trade_id = await open_paper_trade(signal)
-
-                    paper_entry_time = time.monotonic()
-
-                    # Record latency
-                    await record_latency(
-                        signal_id=signal.signal_id,
-                        ws_receive_time=ws_receive_time,
-                        signal_gen_time=signal_gen_time,
-                        paper_entry_time=paper_entry_time,
-                    )
-
-                # Alert for HIGH only
-                if signal.tier == Tier.HIGH:
-                    await alert_on_signal(signal)
-
+            await run_bond_scan_once()
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
-            log.warning("phase2_signal_error", error=str(exc))
-
-    # Phase 1 legacy log_paper_trade removed — Phase 2 paper_trades_v2 is the
-    # authoritative paper trading system. Keeping both caused double-logging
-    # with inconsistent sizing logic.
-
-
-async def on_x_wallet(wallet: str) -> None:
-    from discovery.watchlist import add_wallet
-    await add_wallet(wallet, source="x_mention")
-    log.info("wallet_from_x", wallet=wallet)
+            log.error("bond_scanner_error", error=str(exc))
+        try:
+            import random
+            jitter = random.uniform(-config.BOND_SCAN_JITTER, config.BOND_SCAN_JITTER)
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=max(60, config.BOND_SCAN_INTERVAL + jitter))
+            break
+        except asyncio.TimeoutError:
+            pass
 
 
-# ── Register health checks ───────────────────────────────────
+async def _run_bond_order_manager() -> None:
+    if not config.BOND_ENABLED:
+        log.info("bond_order_manager_disabled")
+        return
+    from execution.order_manager import run_order_fill_once
+    while not _shutdown_event.is_set():
+        try:
+            await run_order_fill_once()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            log.error("bond_order_manager_error", error=str(exc))
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.BOND_ORDER_POLL_INTERVAL)
+            break
+        except asyncio.TimeoutError:
+            pass
+
+
+async def _run_bond_resolution_checker() -> None:
+    if not config.BOND_ENABLED:
+        log.info("bond_resolution_disabled")
+        return
+    from execution.order_manager import run_bond_position_once
+    while not _shutdown_event.is_set():
+        try:
+            await run_bond_position_once()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            log.error("bond_resolution_error", error=str(exc))
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.BOND_RESOLUTION_POLL_INTERVAL)
+            break
+        except asyncio.TimeoutError:
+            pass
+
+
+async def _run_domain_watch() -> None:
+    if not config.DOMAIN_WATCH_ENABLED:
+        log.info("domain_watch_disabled")
+        return
+    from strategies.domain_watch import sync_domain_watchlist, update_prices_and_detect, send_domain_alerts
+    while not _shutdown_event.is_set():
+        try:
+            synced = await sync_domain_watchlist()
+            if synced:
+                log.info("domain_watchlist_synced", markets=synced)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            # Fix #40: Specific error logging for sync phase
+            log.error("domain_watchlist_sync_error", error=str(exc))
+        
+        try:
+            alerts = await update_prices_and_detect()
+            if alerts:
+                sent = await send_domain_alerts(alerts)
+                log.info("domain_alerts", detected=len(alerts), sent=sent)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            # Fix #40: Specific error logging for detection phase
+            log.error("domain_price_detect_error", error=str(exc))
+        
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=config.DOMAIN_WATCH_INTERVAL)
+            break
+        except asyncio.TimeoutError:
+            pass
+
+
+# -- Health checks ------------------------------------------------------------
 
 def _register_health_checks() -> None:
     from storage.cache import health_check as redis_hc
+    from storage.db import health_check as db_hc
     from feeds.clob_ws import health_check as clob_hc
-    from feeds.data_api import health_check as data_hc
     from feeds.gamma_api import health_check as gamma_hc
-    from feeds.binance_ws import health_check as binance_hc
-    from feeds.activity_poller import health_check as activity_hc
 
+    health_monitor.register("db", db_hc)
     health_monitor.register("redis", redis_hc)
     health_monitor.register("clob_ws", clob_hc)
-    health_monitor.register("data_api", data_hc)
     health_monitor.register("gamma_api", gamma_hc)
-    health_monitor.register("binance_ws", binance_hc)
-    health_monitor.register("activity_poller", activity_hc)
-
-    if config.X_BEARER_TOKEN:
-        from feeds.x_stream import health_check as x_hc
-        health_monitor.register("x_stream", x_hc)
-    else:
-        log.info("x_stream_health_check_skipped", reason="no bearer token configured")
 
 
-# ── Main ──────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 async def main() -> None:
-    setup_logging()
-    log.info("starting", version="phase-2")
+    global _shutdown_event
+    _shutdown_event = asyncio.Event()
 
-    # Bootstrap database (Phase 1 tables)
+    setup_logging()
+    _check_pid_file()
+    log.info("starting", version="polybond-v1")
+
     db_bootstrap()
     log.info("database_ready")
 
-    # Bootstrap Phase 2 tables
-    from paper_trading.engine import bootstrap_paper_tables
-    bootstrap_paper_tables()
-    log.info("phase2_tables_ready")
+    # Notify on startup
+    try:
+        from alerts.notifier import send_imsg
+        await send_imsg("BOT STARTED: Polybond bot initializing")
+    except Exception:
+        pass
 
-    # Verify Redis (optional — run degraded without it)
-    if not await cache.health_check():
-        log.warning("redis_unavailable", hint="run: brew services start redis — running in degraded mode")
-    else:
+    if config.BOND_ENABLED and config.POLYMARKET_PRIVATE_KEY:
+        try:
+            from execution.clob_client import initialize as clob_init
+            clob_info = await clob_init()
+            log.info("clob_client_ready", balance=clob_info.get("balance", 0))
+        except Exception as exc:
+            log.error("clob_client_init_failed", error=str(exc))
+            log.warning("bond_trading_will_be_degraded")
+
+    if await cache.health_check():
         log.info("redis_ready")
+    else:
+        log.info("redis_unavailable", hint="optional — bot degrades to DB/API fallback")
 
-    # Register health checks
     _register_health_checks()
 
-    # Set up signal handlers
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s))
 
-    # Launch all tasks (Phase 1 + Phase 2 + Activity Poller)
+    # Start heartbeat dead-man's switch (exchange auto-cancels orders if missed)
+    if config.BOND_ENABLED and config.POLYMARKET_PRIVATE_KEY:
+        try:
+            from execution.clob_client import start_heartbeat
+            await start_heartbeat()
+            log.info("heartbeat_active")
+        except Exception as exc:
+            log.warning("heartbeat_start_failed", error=str(exc))
+
+    _task_runners = {
+        "clob_ws": _run_clob_ws_orderbooks,
+        "market_sync": _run_market_sync,
+        "dashboard": _run_dashboard,
+        "health": _run_health_loop,
+        "backup": _run_backup_loop,
+        "bond_scanner": _run_bond_scanner,
+        "bond_orders": _run_bond_order_manager,
+        "bond_resolution": _run_bond_resolution_checker,
+        "domain_watch": _run_domain_watch,
+    }
+
     tasks = [
-        # Phase 1
-        asyncio.create_task(_run_clob_ws(on_trade=on_large_trade), name="clob_ws"),
-        asyncio.create_task(_run_x_stream(on_wallet=on_x_wallet), name="x_stream"),
-        asyncio.create_task(_run_binance_ws(), name="binance_ws"),
-        asyncio.create_task(_run_discovery(), name="discovery"),
-        asyncio.create_task(_run_market_sync(), name="market_sync"),
-        asyncio.create_task(_run_dashboard(), name="dashboard"),
-        asyncio.create_task(_run_health_loop(), name="health"),
-        asyncio.create_task(_run_resolution_processor(), name="resolution"),
-        asyncio.create_task(_run_cluster_analysis(), name="cluster_analysis"),
-        asyncio.create_task(_run_honeypot_scan(), name="honeypot_scan"),
-        # Phase 2
-        asyncio.create_task(_run_paper_position_manager(), name="paper_positions"),
-        asyncio.create_task(_run_tuner(), name="tuner"),
-        asyncio.create_task(_run_daily_summary(), name="daily_summary"),
-        # Data API activity poller (provides wallet addresses for trades)
-        asyncio.create_task(_run_activity_poller(), name="activity_poller"),
+        asyncio.create_task(runner(), name=name)
+        for name, runner in _task_runners.items()
     ]
 
-    log.info("all_feeds_launched", count=len(tasks))
+    log.info("all_tasks_launched", count=len(tasks))
 
-    # Wait for shutdown signal
+    # Monitor for crashed tasks — restart them automatically
+    async def _monitor_tasks():
+        while not _shutdown_event.is_set():
+            for i, t in enumerate(tasks):
+                if t.done() and not t.cancelled():
+                    try:
+                        exc = t.exception()
+                    except (asyncio.CancelledError, Exception):
+                        exc = None
+                    if exc:
+                        task_name = t.get_name()
+                        log.error("task_died_restarting", task=task_name, error=str(exc))
+                        try:
+                            from alerts.notifier import send_imsg
+                            await send_imsg(f"TASK DIED (restarting): {task_name} — {str(exc)[:100]}")
+                        except Exception:
+                            pass
+                        # Restart the task
+                        runner = _task_runners.get(task_name)
+                        if runner:
+                            tasks[i] = asyncio.create_task(runner(), name=task_name)
+                            log.info("task_restarted", task=task_name)
+            try:
+                await asyncio.wait_for(_shutdown_event.wait(), timeout=config.TASK_MONITOR_INTERVAL)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+    monitor_task = asyncio.create_task(_monitor_tasks(), name="task_monitor")
+
     await _shutdown_event.wait()
+    monitor_task.cancel()
     log.info("shutting_down")
 
+    # Stop heartbeat FIRST so the exchange doesn't auto-cancel orders
+    if config.BOND_ENABLED:
+        try:
+            from execution.clob_client import stop_heartbeat
+            await asyncio.wait_for(stop_heartbeat(), timeout=config.HEARTBEAT_STOP_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.warning("heartbeat_stop_timeout")
+        except Exception:
+            pass
+
+    # Cancel tasks before sending shutdown notification
     for t in tasks:
         t.cancel()
-
     await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Cleanup
-    await cache.close()
-    from feeds.data_api import close as data_close
-    from feeds.gamma_api import close as gamma_close
-    from feeds.x_stream import close as x_close
-    from feeds.binance_ws import close as binance_close
-    await data_close()
-    await gamma_close()
-    await x_close()
-    await binance_close()
-    # activity_poller doesn't need explicit cleanup (uses shared data_api session)
+    # Notify on shutdown (after tasks cancelled so nothing interferes)
+    try:
+        from alerts.notifier import send_imsg
+        await send_imsg("BOT SHUTDOWN: Polybond bot shutting down gracefully")
+    except Exception:
+        pass
 
+    await cache.close()
+    from feeds.gamma_api import close as gamma_close
+    await gamma_close()
+
+    # Close proxy HTTP client
+    try:
+        from execution.clob_client import close_proxy_client
+        close_proxy_client()
+    except Exception:
+        pass
+
+    # Flush WAL and close DuckDB cleanly
+    try:
+        from storage.db import get_conn, _db_lock
+        with _db_lock:
+            conn = get_conn()
+            conn.execute("CHECKPOINT")
+            conn.close()
+        log.info("duckdb_closed")
+    except Exception as exc:
+        log.warning("duckdb_close_failed", error=str(exc))
+
+    _remove_pid_file()
     log.info("shutdown_complete")
 
 

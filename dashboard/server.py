@@ -1367,7 +1367,9 @@ var _tk=new URLSearchParams(location.search).get('token')||'';
 function apiUrl(p){return p+(_tk?(p.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(_tk):'');}
 
 var _tabHidden=document.hidden||false;
+var _activeDashTab='portfolio';
 document.addEventListener('visibilitychange',function(){_tabHidden=document.hidden;});
+function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
 
 (function(){
   // -- Tab switching (lazy-load) --
@@ -1378,6 +1380,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       document.querySelectorAll('.tab-content').forEach(function(c){ c.classList.remove('active'); });
       tab.classList.add('active');
       document.getElementById('tab-'+tab.dataset.tab).classList.add('active');
+      _activeDashTab=tab.dataset.tab;
       localStorage.setItem('activeTab', tab.dataset.tab);
       if(tab.dataset.tab==='opportunities'&&!_oppsLoaded){loadOpportunities();_oppsLoaded=true;}
       if(tab.dataset.tab==='watchlist'&&!_watchLoaded){loadWatchlist();_watchLoaded=true;}
@@ -1387,6 +1390,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   // Restore saved tab on load
   var savedTab = localStorage.getItem('activeTab');
   if(savedTab){
+    _activeDashTab=savedTab;
     var t = document.querySelector('.tab[data-tab="'+savedTab+'"]');
     if(t) t.click();
   }
@@ -1576,7 +1580,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   }
   window.switchChartTab=switchChartTab;
   function loadEquityChart(){
-    if(_tabHidden)return;
+    if(!isTabActive("portfolio"))return;
     if(_chartLoading)return;
     _chartLoading=true;
     if(_chartAbort){_chartAbort.abort();}
@@ -1710,8 +1714,9 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       var dailyEl=document.getElementById('kpi-daily-orders');if(dailyEl){var filled=d.daily_orders_filled||0;dailyEl.textContent=filled+'/'+(d.daily_orders_max||0);}
       var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}?'pnl-negative':ddPct>{{ drawdown_warn_pct }}?'pnl-warn':'');}
       var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct*100/30)+'%';ddBar.className='drawdown-fill '+(ddPct>15?'dd-danger':ddPct>5?'dd-warn':'dd-ok');}
-      // Capital utilization
-      var cash_total=N(d.cash);var inv_total=N(d.invested);var eq_total=cash_total+inv_total;
+      // Capital utilization (equity = cash + invested + unrealized P&L)
+      var cash_total=N(d.cash);var inv_total=N(d.invested);var upnl_total=N(d.unrealized_pnl);
+      var eq_total=cash_total+inv_total+upnl_total;
       var capPct=eq_total>0?(inv_total/eq_total*100):0;
       var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
       var capBar=document.getElementById('kpi-cap-util-bar');
@@ -1825,7 +1830,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
     };
   }
   function loadPositions(){
-    if(_tabHidden)return;
+    if(!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/positions')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('positions-table').innerHTML=errorHtml(data.error,'loadPositions');document.getElementById('positions-count').textContent='error';return;}
       _posData=Array.isArray(data)?data:[];
@@ -1833,14 +1838,19 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       sortData(_posData,_posSortKey,_posSortAsc);
       renderPositions(_posData);
       // Update avg yield/days from positions (cash/invested updated from KPI refresh)
+      var ayEl=document.getElementById('kpi-avg-yield');
+      var adEl=document.getElementById('kpi-avg-days');
       if(_posData.length>0){
         var totalYield=0,totalDays=0,countDays=0;
         _posData.forEach(function(r){
           totalYield+=N(r.annualized_yield);
           if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
         });
-        var ayEl=document.getElementById('kpi-avg-yield');if(ayEl)ayEl.textContent=(totalYield/_posData.length*100).toFixed(1)+'%';
-        var adEl=document.getElementById('kpi-avg-days');if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
+        if(ayEl)ayEl.textContent=(totalYield/_posData.length*100).toFixed(1)+'%';
+        if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
+      } else {
+        if(ayEl)ayEl.textContent='\u2014';
+        if(adEl)adEl.textContent='\u2014';
       }
     }).catch(function(){
       document.getElementById('positions-table').innerHTML=errorHtml('Failed to load positions','loadPositions');
@@ -1852,7 +1862,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
 
   // -- Pending Orders --
   function loadPendingOrders(){
-    if(_tabHidden)return;
+    if(!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/orders')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       var panel=document.getElementById('pending-orders-panel');
       var el=document.getElementById('pending-orders-table');
@@ -1935,7 +1945,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
     };
   }
   function loadHistory(){
-    if(_tabHidden)return;
+    if(!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/history')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       var el=document.getElementById('history-table');
       if(data.error){el.innerHTML=errorHtml(data.error,'loadHistory');document.getElementById('history-count').textContent='error';return;}
@@ -2171,7 +2181,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
 
   var _oppsLoading=false;
   function loadOpportunities(){
-    if(_tabHidden)return;
+    if(!isTabActive("opportunities"))return;
     if(_oppsLoading)return;
     _oppsLoading=true;
     fetchWithTimeout(apiUrl('/api/bonds/opportunities')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
@@ -2317,7 +2327,7 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   })();
 
   function loadWatchlist(){
-    if(_tabHidden)return;
+    if(!isTabActive("watchlist"))return;
     fetchWithTimeout(apiUrl('/api/watchlist/crypto')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('watchlist-table').innerHTML=errorHtml(data.error,'loadWatchlist');document.getElementById('watchlist-count').textContent='error';return;}
       _watchData=Array.isArray(data)?data:[];

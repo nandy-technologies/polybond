@@ -698,7 +698,7 @@ async def get_fee_rate(token_id: str) -> int:
     try:
         return await _to_thread_with_timeout(_get)
     except Exception:
-        return 200  # 2% default
+        return config.BOND_DEFAULT_FEE_BPS
 
 
 def _normalize_order_result(result) -> dict:
@@ -824,7 +824,7 @@ async def _heartbeat_loop() -> None:
                     )
                 except Exception:
                     pass
-        await asyncio.sleep(5)
+        await asyncio.sleep(config.HEARTBEAT_INTERVAL_SEC)
 
 
 def _post_heartbeat_sync(hb_id: str) -> str | None:
@@ -1120,6 +1120,8 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
             "best_ask": best_ask,
             "spread": round(spread, 4),
             "mid_price": round(mid_price, 4),
+            "ask_depth": round(sum(a["price"] * a["size"] for a in sorted(asks, key=lambda x: x["price"])[:10]), 2),
+            "bid_depth": round(sum(b["price"] * b["size"] for b in sorted(bids, key=lambda x: x["price"], reverse=True)[:10]), 2),
             "ts": __import__("time").time(),
         }
     except Exception as exc:

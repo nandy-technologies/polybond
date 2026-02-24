@@ -1208,12 +1208,12 @@ async def run_bond_position_once() -> None:
     await _recover_stranded_exiting()
 
     _reconcile_counter += 1
-    if _reconcile_counter >= 5:
+    if _reconcile_counter >= config.BOND_RECONCILE_CYCLES:
         await reconcile_orders()
         await cleanup_stale_orders()
         _reconcile_counter = 0
 
     _mtm_counter += 1
-    if _mtm_counter >= 5:
+    if _mtm_counter >= config.BOND_RECONCILE_CYCLES:
         await snapshot_bond_equity()
         _mtm_counter = 0

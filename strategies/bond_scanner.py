@@ -779,7 +779,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         try:
             return await get_fee_rate(tid)
         except Exception:
-            return 200  # Conservative 2% fallback when API unreachable
+            return config.BOND_DEFAULT_FEE_BPS
 
     async def _safe_tick(tid: str) -> str:
         try:
@@ -1185,7 +1185,8 @@ async def _subscribe_bond_candidates(candidates: list[dict]) -> None:
     import feeds.clob_ws as _clob_ws_mod
     from feeds.clob_ws import subscribe_markets
 
-    if not candidates or _clob_ws_mod._ws is None:
+    ws = _clob_ws_mod._ws
+    if not candidates or ws is None:
         return
 
     high_score_tokens = [
@@ -1195,7 +1196,7 @@ async def _subscribe_bond_candidates(candidates: list[dict]) -> None:
 
     if high_score_tokens:
         try:
-            await subscribe_markets(_clob_ws_mod._ws, high_score_tokens)
+            await subscribe_markets(ws, high_score_tokens)
             log.info("ws_bond_subscriptions_added", count=len(high_score_tokens))
         except Exception as exc:
             log.warning("ws_bond_subscribe_failed", error=str(exc))

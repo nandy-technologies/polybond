@@ -51,4 +51,4 @@ DRAWDOWN_WARN_PCT = 10
 MANUAL_TRADE_OPP_SCORE = 0.5
 
 # Bond sizing formula display
-SIZING_FORMULA = "cash * kelly * concentration * diversification * time_urgency * sqrt(score)"
+SIZING_FORMULA = "cash * kelly * concentration * diversification * sqrt(score)"

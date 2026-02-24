@@ -861,7 +861,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         # Fix #26: validate order_price is still valid after rounding
         if order_price >= best_ask:
             order_price = best_ask - tick_size
-        if order_price <= best_bid or order_price <= 0 or order_price >= 1:
+        if order_price < best_bid or order_price <= 0 or order_price >= 1:
             continue  # Skip - can't improve price without crossing spread
 
         # Override price for taker orders — must cross spread for immediate fill
@@ -1165,9 +1165,10 @@ def _prune_negative_cache(max_age_sec: float = 600) -> None:
 
 async def _subscribe_bond_candidates(candidates: list[dict]) -> None:
     """Subscribe to WS orderbook feeds for bond-range tokens."""
-    from feeds.clob_ws import subscribe_markets, _ws
+    import feeds.clob_ws as _clob_ws_mod
+    from feeds.clob_ws import subscribe_markets
 
-    if not candidates or _ws is None:
+    if not candidates or _clob_ws_mod._ws is None:
         return
 
     high_score_tokens = [

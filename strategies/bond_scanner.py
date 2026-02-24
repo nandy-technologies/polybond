@@ -1178,7 +1178,7 @@ async def _subscribe_bond_candidates(candidates: list[dict]) -> None:
 
     if high_score_tokens:
         try:
-            await subscribe_markets(_ws, high_score_tokens)
+            await subscribe_markets(_clob_ws_mod._ws, high_score_tokens)
             log.info("ws_bond_subscriptions_added", count=len(high_score_tokens))
         except Exception as exc:
             log.warning("ws_bond_subscribe_failed", error=str(exc))

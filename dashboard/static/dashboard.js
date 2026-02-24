@@ -415,7 +415,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       var age=posAge(r.opened_at);
       html+='<td class="num"><span class="age-badge '+age.cls+'">'+age.text+'</span></td>';
       html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
-      html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="event.stopPropagation();exitPosition(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',this)">Exit</button>')+'</td></tr>';
+      html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="event.stopPropagation();exitPosition(\x27'+htmlEscape(r.market_id)+'\x27,\x27'+htmlEscape(r.token_id)+'\x27,this)">Exit</button>')+'</td></tr>';
       // Expandable detail row
       var pLink=r.slug?'https://polymarket.com/event/'+(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+r.slug:''):'';
       html+='<tr class="pos-expand-row" data-pidx="'+idx+'"><td colspan="'+cols.length+'">';
@@ -506,7 +506,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
         html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.size))+'</span></td>';
         html+='<td class="num">'+N(r.shares).toFixed(1)+'</td>';
         var oAge=posAge(r.created_at);html+='<td class="td-muted">'+oAge.text+'</td>';
-        html+='<td><button class="btn-action btn-cancel-order" onclick="cancelOrder('+(Number(r.id)||0)+',\\''+htmlEscape(r.clob_order_id||'')+'\\',this)">Cancel</button></td></tr>';
+        html+='<td><button class="btn-action btn-cancel-order" onclick="cancelOrder('+(Number(r.id)||0)+',\x27'+htmlEscape(r.clob_order_id||'')+'\x27,this)">Cancel</button></td></tr>';
       });
       html+='</tbody></table></div>';
       el.innerHTML=html;attachScrollFade(el);
@@ -615,7 +615,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     html+='<td class="num factor-cell">'+bar(r.spread_efficiency)+'</td>';
     html+='<td class="num"><span class="bal-val">'+(r.computed_size?fmtMoney(r.computed_size):'\u2014')+'</span></td>';
     var canBuy=isBuyable&&r.computed_size&&r.computed_size>=window.DASHBOARD_CONFIG.minBuyableUsd;
-    html+='<td>'+(canBuy?'<button class="btn-action btn-buy" onclick="buyOpportunity(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',\\''+htmlEscape(r.outcome)+'\\',this)">Buy</button>':'<span class="td-muted" title="Edge too small">\u2014</span>')+'</td></tr>';
+    html+='<td>'+(canBuy?'<button class="btn-action btn-buy" onclick="buyOpportunity(\x27'+htmlEscape(r.market_id)+'\x27,\x27'+htmlEscape(r.token_id)+'\x27,\x27'+htmlEscape(r.outcome)+'\x27,this)">Buy</button>':'<span class="td-muted" title="Edge too small">\u2014</span>')+'</td></tr>';
     return html;
   }
 

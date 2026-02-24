@@ -533,7 +533,7 @@ _DASHBOARD_HTML = """\
     .bal-val { transition: filter 0.2s ease; }
     .bal-hidden .bal-val { filter: blur(8px) !important; user-select: none; }
     .bal-chart-wrap { position: relative; }
-    .bal-chart-mask { display: none; }
+    /* bal-chart-mask removed — dead code */
 
     /* -- Charts -- */
     .chart-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
@@ -962,7 +962,7 @@ _DASHBOARD_HTML = """\
           </div>
           <div class="stat-card">
             <div class="value" id="kpi-winrate">{{ "%.0f"|format(overview.win_rate * 100) }}%</div>
-            <div class="label">Win Rate</div>
+            <div class="label" title="Resolved wins / (wins + losses). Manual exits excluded.">Win Rate</div>
           </div>
         </div>
         <div class="kpi-summary-row" id="kpi-summary-row">
@@ -1027,7 +1027,6 @@ _DASHBOARD_HTML = """\
         <div class="chart-container bal-chart-wrap" id="chart-wrap">
           <canvas id="equity-chart"></canvas>
           <canvas id="yield-chart" style="display:none"></canvas>
-          <div class="bal-chart-mask">Show balances to view chart</div>
         </div>
       </div>
 
@@ -1272,6 +1271,10 @@ _DASHBOARD_HTML = """\
             <span class="info-text">&mdash; GTC orders unfilled for > {{ bond_order_timeout }}h auto-cancelled</span>
           </div>
           <div class="strategy-safety-row">
+            <strong>Stop loss</strong>
+            <span class="info-text">&mdash; Exit position if adverse move exceeds {{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</span>
+          </div>
+          <div class="strategy-safety-row">
             <strong>Scan interval</strong>
             <span class="info-text">&mdash; Every {{ bond_scan_interval }}s</span>
           </div>
@@ -1306,6 +1309,13 @@ _DASHBOARD_HTML = """\
               <tr><td>Adaptive Pricing</td><td>{{ bond_adaptive_pricing }} / {{ bond_price_improve_secs }}s</td></tr>
               <tr><td>Halt Drawdown</td><td>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}% / min ${{ bond_halt_min_equity }}</td></tr>
               <tr><td>Order Timeout</td><td>{{ bond_order_timeout }}h</td></tr>
+              <tr><td>Stop Loss</td><td>{{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</td></tr>
+              <tr><td>Entry Price Range</td><td>${{ bond_min_entry_price }} &ndash; ${{ bond_max_entry_price }}</td></tr>
+              <tr><td>Min Volume</td><td>${{ "{:,.0f}".format(bond_min_volume) }}</td></tr>
+              <tr><td>Min Liquidity</td><td>${{ "{:,.0f}".format(bond_min_liquidity) }}</td></tr>
+              <tr><td>Min Score</td><td>{{ bond_min_score }}</td></tr>
+              <tr><td>Averaging</td><td>{{ "Enabled (max " ~ bond_max_position_adds ~ " adds)" if bond_allow_averaging else "Disabled" }}</td></tr>
+              <tr><td>Balance Haircut</td><td>{{ "%.0f"|format(balance_haircut_factor * 100) }}%</td></tr>
               <tr><td>Domain Watch</td><td>{{ domain_watch_enabled }}</td></tr>
             </tbody>
           </table>
@@ -1868,7 +1878,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       document.getElementById('pending-orders-count').textContent=rows.length;
       if(!rows.length){panel.style.display='none';panel.classList.remove('has-orders');return;}
       panel.style.display='';panel.classList.add('has-orders');
-      var html='<div class="table-wrap"><table><thead><tr><th>Market</th><th>Side</th><th class="num">Price</th><th class="num">Size</th><th class="num">Shares</th><th>Age</th><th></th></tr></thead><tbody>';
+      var html='<div class="table-wrap"><table><thead><tr><th>Market</th><th>Side</th><th class="num">Price</th><th class="num">Cost</th><th class="num">Shares</th><th>Age</th><th></th></tr></thead><tbody>';
       rows.forEach(function(r){
         var qText=htmlEscape(truncate(r.question||'',60));
         var qFull=htmlEscape(r.question||'');
@@ -2700,6 +2710,15 @@ def create_app() -> FastAPI:
                 bond_order_timeout=config.BOND_ORDER_TIMEOUT_HOURS,
                 bond_scan_interval=config.BOND_SCAN_INTERVAL,
                 domain_watch_enabled=config.DOMAIN_WATCH_ENABLED,
+                bond_stop_loss_pct=config.BOND_STOP_LOSS_PCT,
+                bond_min_entry_price=config.BOND_MIN_ENTRY_PRICE,
+                bond_max_entry_price=config.BOND_MAX_ENTRY_PRICE,
+                bond_min_volume=config.BOND_MIN_VOLUME,
+                bond_min_liquidity=config.BOND_MIN_LIQUIDITY,
+                bond_min_score=config.BOND_MIN_SCORE,
+                bond_allow_averaging=config.BOND_ALLOW_AVERAGING,
+                bond_max_position_adds=config.BOND_MAX_POSITION_ADDS,
+                balance_haircut_factor=config.BALANCE_HAIRCUT_FACTOR,
                 heartbeat_interval=config.HEARTBEAT_INTERVAL_SEC,
                 heartbeat_timeout=config.HEARTBEAT_TIMEOUT_SEC,
                 bond_reconcile_cycles=config.BOND_RECONCILE_CYCLES,

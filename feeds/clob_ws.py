@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -14,28 +13,37 @@ import websockets
 import websockets.exceptions
 
 import config
-from storage import cache
-from storage.db import execute
 from utils.logger import get_logger
 
 log = get_logger("clob_ws")
 
 # ── Module state ─────────────────────────────────────────────
+_MAX_SUBSCRIPTIONS: int = 500
+
 _ws: websockets.WebSocketClientProtocol | None = None
 _subscribed_markets: set[str] = set()
 _last_message_ts: float = 0.0
+_connect_time: float = 0.0
 _reconnect_attempts: int = 0
+_reconnect_count: int = 0
 
 # Orderbook snapshots per market (LRU via OrderedDict)
 _orderbooks: OrderedDict[str, dict] = OrderedDict()
-
-# Callback for orderbook updates
-_on_orderbook_cb: Callable | None = None
 
 # Backoff parameters
 _BACKOFF_BASE: float = 1.0
 _BACKOFF_MAX: float = 60.0
 _BACKOFF_FACTOR: float = 2.0
+
+# Background task set to prevent GC of fire-and-forget tasks
+_background_tasks: set = set()
+
+
+def _task_done_callback(task: asyncio.Task) -> None:
+    """Log exceptions from fire-and-forget tasks, then discard."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception():
+        log.warning("background_task_error", error=str(task.exception()))
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -98,7 +106,8 @@ def _parse_fill(raw: dict) -> dict | None:
         # own row, but at least prevents literal duplicate messages from
         # being double-counted.
         if tx_hash:
-            trade_id = tx_hash
+            asset_id = raw.get("asset_id", "")
+            trade_id = f"{tx_hash}-{asset_id}" if asset_id else tx_hash
         else:
             import hashlib
             dedup_payload = f"{raw.get('market','')}-{raw.get('asset_id','')}-{price_raw}-{size_raw}-{ts_raw}"
@@ -122,42 +131,6 @@ def _parse_fill(raw: dict) -> dict | None:
         return None
 
 
-async def _store_fill(fill: dict) -> None:
-    """Persist a fill to DuckDB and push to Redis cache."""
-    try:
-        await asyncio.to_thread(
-            execute,
-            """
-            INSERT INTO trades (id, wallet, market_id, side, price, size, usd_value, ts, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'clob_ws')
-            ON CONFLICT DO NOTHING
-            """,
-            [
-                fill["id"],
-                fill["wallet"],
-                fill["market_id"],
-                fill["side"],
-                fill["price"],
-                fill["size"],
-                fill["usd_value"],
-                fill["ts"].isoformat(),
-            ],
-        )
-    except Exception as exc:
-        log.error("db_store_fill_error", error=str(exc), fill_id=fill["id"])
-
-    try:
-        # Serialise for Redis (convert datetime to ISO string)
-        trade_for_cache = {**fill, "ts": fill["ts"].isoformat()}
-        if fill["wallet"]:
-            await cache.push_recent_trade(fill["wallet"], trade_for_cache)
-        # Also push for maker if different
-        if fill.get("maker") and fill["maker"] != fill.get("wallet", ""):
-            await cache.push_recent_trade(fill["maker"], trade_for_cache)
-    except Exception as exc:
-        log.warning("cache_push_error", error=str(exc), fill_id=fill["id"])
-
-
 def _parse_orderbook(raw: dict) -> dict | None:
     """Extract orderbook snapshot from a CLOB WS message.
 
@@ -177,23 +150,53 @@ def _parse_orderbook(raw: dict) -> dict | None:
         market_id = raw.get("market", raw.get("asset_id", ""))
 
         # Handle price_change events (compact updates with best_bid/best_ask)
+        # Store ALL entries directly into _orderbooks so multi-asset batches
+        # don't drop intermediate tokens. Return the last one for the caller.
         if price_changes and isinstance(price_changes, list):
-            pc = price_changes[0]
-            best_bid = float(pc.get("best_bid", 0))
-            best_ask = float(pc.get("best_ask", 0))
-            spread = best_ask - best_bid
-            mid_price = (best_bid + best_ask) / 2.0 if (best_bid + best_ask) > 0 else 0.0
-            return {
-                "market_id": market_id,
-                "asset_id": pc.get("asset_id", ""),
-                "bids": [{"price": best_bid, "size": float(pc.get("size", 0))}],
-                "asks": [{"price": best_ask, "size": 0}],
-                "best_bid": best_bid,
-                "best_ask": best_ask,
-                "spread": round(spread, 4),
-                "mid_price": round(mid_price, 4),
-                "ts": time.time(),
-            }
+            result = None
+            now = time.time()
+            for pc in price_changes:
+                best_bid = float(pc.get("best_bid", 0))
+                best_ask = float(pc.get("best_ask", 0))
+                spread = best_ask - best_bid if (best_bid > 0 and best_ask > 0) else 0.0
+                if best_bid > 0 and best_ask > 0:
+                    mid_price = (best_bid + best_ask) / 2.0
+                elif best_bid > 0:
+                    mid_price = best_bid
+                elif best_ask > 0:
+                    mid_price = best_ask
+                else:
+                    mid_price = 0.0
+                asset_id = pc.get("asset_id", "")
+                entry = {
+                    "market_id": market_id,
+                    "asset_id": asset_id,
+                    "bids": [{"price": best_bid, "size": float(pc.get("size", 0))}],
+                    "asks": [{"price": best_ask, "size": 0}],
+                    "best_bid": best_bid,
+                    "best_ask": best_ask,
+                    "spread": round(spread, 4),
+                    "mid_price": round(mid_price, 4),
+                    "ts": now,
+                }
+                # Store each asset directly (prevents batch data loss)
+                if asset_id:
+                    prev = _orderbooks.get(asset_id)
+                    if prev is not None:
+                        new_asks = entry.get("asks", [])
+                        if (len(new_asks) == 1 and new_asks[0].get("size", 0) == 0
+                                and len(prev.get("asks", [])) > 1):
+                            entry["asks"] = prev["asks"]
+                        new_bids = entry.get("bids", [])
+                        if (len(new_bids) == 1 and len(prev.get("bids", [])) > 1):
+                            entry["bids"] = prev["bids"]
+                    _orderbooks[asset_id] = entry
+                    _orderbooks.move_to_end(asset_id)
+                result = entry
+            # Cap cache after batch insertion
+            while len(_orderbooks) > 500:
+                _orderbooks.popitem(last=False)
+            return result
 
         # Handle full orderbook snapshots
         if bids is None:
@@ -212,9 +215,16 @@ def _parse_orderbook(raw: dict) -> dict | None:
         )
 
         best_bid = parsed_bids[0]["price"] if parsed_bids else 0.0
-        best_ask = parsed_asks[0]["price"] if parsed_asks else 1.0
-        spread = best_ask - best_bid
-        mid_price = (best_bid + best_ask) / 2.0
+        best_ask = parsed_asks[0]["price"] if parsed_asks else 0.0
+        spread = best_ask - best_bid if (best_bid > 0 and best_ask > 0) else 0.0
+        if best_bid > 0 and best_ask > 0:
+            mid_price = (best_bid + best_ask) / 2.0
+        elif best_bid > 0:
+            mid_price = best_bid
+        elif best_ask > 0:
+            mid_price = best_ask
+        else:
+            mid_price = 0.0
 
         return {
             "market_id": market_id,
@@ -234,9 +244,28 @@ def _parse_orderbook(raw: dict) -> dict | None:
 
 # ── Public API ───────────────────────────────────────────────
 
-def get_orderbook(market_id: str) -> dict | None:
-    """Return the latest orderbook snapshot for a market."""
-    return _orderbooks.get(market_id)
+def get_orderbook(token_id: str, max_age: float = 0) -> dict | None:
+    """Return the latest orderbook snapshot for a token.
+
+    If max_age > 0, returns None for entries older than max_age seconds.
+    """
+    ob = _orderbooks.get(token_id)
+    if ob is None:
+        return None
+    if max_age > 0:
+        import time as _time
+        ts = ob.get("ts", 0)
+        if ts > 0 and (_time.time() - ts) > max_age:
+            return None
+    return ob
+
+
+def cache_orderbook(token_id: str, ob: dict) -> None:
+    """Insert an orderbook entry into the cache (e.g. from REST fallback)."""
+    _orderbooks[token_id] = ob
+    _orderbooks.move_to_end(token_id)
+    while len(_orderbooks) > 500:
+        _orderbooks.popitem(last=False)
 
 
 async def subscribe_markets(ws: websockets.WebSocketClientProtocol, token_ids: list[str]) -> None:
@@ -256,6 +285,11 @@ async def subscribe_markets(ws: websockets.WebSocketClientProtocol, token_ids: l
     if not new_ids:
         return
 
+    # Cap total subscriptions at _MAX_SUBSCRIPTIONS
+    if len(_subscribed_markets) + len(new_ids) > _MAX_SUBSCRIPTIONS:
+        tokens_to_prune = (len(_subscribed_markets) + len(new_ids)) - _MAX_SUBSCRIPTIONS
+        await prune_stale_subscriptions(force_count=tokens_to_prune)
+
     msg = orjson.dumps({
         "assets_ids": new_ids,
         "type": "market",
@@ -272,6 +306,15 @@ async def subscribe_market(ws: websockets.WebSocketClientProtocol, token_id: str
 
 async def unsubscribe_market(ws: websockets.WebSocketClientProtocol, token_id: str) -> None:
     """Unsubscribe from a market channel."""
+    try:
+        msg = orjson.dumps({
+            "assets_ids": [token_id],
+            "type": "market",
+            "action": "unsubscribe",
+        })
+        await ws.send(msg)
+    except Exception as exc:
+        log.debug("unsubscribe_send_failed", token=token_id, error=str(exc))
     _subscribed_markets.discard(token_id)
     log.debug("unsubscribed", token=token_id)
 
@@ -290,8 +333,8 @@ async def run(
     on_orderbook:
         Optional async or sync callback invoked with orderbook snapshot dicts.
     """
-    global _ws, _last_message_ts, _reconnect_attempts, _on_orderbook_cb
-    _on_orderbook_cb = on_orderbook
+    global _ws, _last_message_ts, _connect_time, _reconnect_attempts, _reconnect_count
+    _reconnect_attempts = 0
 
     while True:
         try:
@@ -305,16 +348,27 @@ async def run(
             ) as ws:
                 _ws = ws
                 _reconnect_attempts = 0
+                _connect_time = time.monotonic()
                 log.info("connected")
 
                 # Re-subscribe to any markets we were tracking before a reconnect
                 if _subscribed_markets:
-                    prev = list(_subscribed_markets)
-                    _subscribed_markets.clear()  # Clear so subscribe_markets sees them as new
-                    await subscribe_markets(ws, prev)
+                    prev = set(_subscribed_markets)
+                    # Fix #9: mark orderbooks as stale instead of purging - avoids REST fallback storm
+                    # Mark all cached orderbooks as stale (set ts to 0) so consumers know to refetch if needed
+                    for token_id in list(_orderbooks.keys()):
+                        if token_id in _orderbooks:
+                            _orderbooks[token_id]["ts"] = 0  # Mark stale
+                            _orderbooks[token_id]["stale"] = True
+                    try:
+                        _subscribed_markets.clear()  # Clear so subscribe_markets sees them as new
+                        await subscribe_markets(ws, list(prev))
+                    except Exception:
+                        _subscribed_markets.update(prev)  # Restore on failure so next reconnect retries
+                        raise
 
                 # Auto-discover and subscribe to active/popular markets
-                await auto_subscribe_active_markets(ws, limit=50)
+                await auto_subscribe_active_markets(ws, limit=200)
 
                 async for raw_msg in ws:
                     _last_message_ts = time.monotonic()
@@ -332,9 +386,23 @@ async def run(
                         # Try orderbook first
                         ob = _parse_orderbook(event)
                         if ob is not None:
-                            # Move to end for LRU ordering
-                            _orderbooks[ob["market_id"]] = ob
-                            _orderbooks.move_to_end(ob["market_id"])
+                            # Store by asset_id (token_id) so callers can look up by token
+                            ob_key = ob.get("asset_id") or ob["market_id"]
+
+                            # Preserve depth from last full snapshot for price_change events
+                            # (price_change events have asks=[{price, size:0}])
+                            prev = _orderbooks.get(ob_key)
+                            if prev is not None:
+                                new_asks = ob.get("asks", [])
+                                if (len(new_asks) == 1 and new_asks[0].get("size", 0) == 0
+                                        and len(prev.get("asks", [])) > 1):
+                                    ob["asks"] = prev["asks"]
+                                new_bids = ob.get("bids", [])
+                                if (len(new_bids) == 1 and len(prev.get("bids", [])) > 1):
+                                    ob["bids"] = prev["bids"]
+
+                            _orderbooks[ob_key] = ob
+                            _orderbooks.move_to_end(ob_key)
                             # Cap orderbook cache — evict oldest (front of OrderedDict)
                             while len(_orderbooks) > 500:
                                 _orderbooks.popitem(last=False)
@@ -342,7 +410,9 @@ async def run(
                                 try:
                                     result = on_orderbook(ob)
                                     if asyncio.iscoroutine(result):
-                                        await result
+                                        task = asyncio.create_task(result)
+                                        _background_tasks.add(task)
+                                        task.add_done_callback(_task_done_callback)
                                 except Exception as cb_exc:
                                     log.warning("on_orderbook_callback_error", error=str(cb_exc))
                             continue
@@ -351,25 +421,13 @@ async def run(
                         if fill is None:
                             continue
 
-                        await _store_fill(fill)
-
-                        # Large trade detection
-                        is_large = fill["usd_value"] >= config.LARGE_TRADE_THRESHOLD
-                        if is_large:
-                            log.info(
-                                "large_trade",
-                                wallet=fill["wallet"],
-                                market=fill["market_id"],
-                                side=fill["side"],
-                                usd=f"{fill['usd_value']:.2f}",
-                            )
-
-                        # Invoke caller callback
                         if on_trade is not None:
                             try:
                                 result = on_trade(fill)
                                 if asyncio.iscoroutine(result):
-                                    await result
+                                    task = asyncio.create_task(result)
+                                    _background_tasks.add(task)
+                                    task.add_done_callback(_task_done_callback)
                             except Exception as cb_exc:
                                 log.warning("on_trade_callback_error", error=str(cb_exc))
 
@@ -388,6 +446,7 @@ async def run(
             _ws = None
 
         # Exponential backoff before reconnect
+        _reconnect_count += 1
         delay = _backoff_delay(_reconnect_attempts)
         _reconnect_attempts += 1
         log.info("reconnecting", delay=f"{delay:.1f}s", attempt=_reconnect_attempts)
@@ -401,18 +460,37 @@ async def auto_subscribe_active_markets(ws: websockets.WebSocketClientProtocol, 
     Fetches active markets, extracts token IDs, subscribes to both trade
     and orderbook channels.  Returns the number of new subscriptions.
     """
-    import aiohttp
-
     try:
-        # Fetch raw market data (we need clobTokenIds which the normalizer strips)
-        url = f"{config.GAMMA_API_BASE}/markets"
-        params = {"limit": str(limit), "active": "true", "order": "volume24hr", "ascending": "false"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as resp:
-                if resp.status != 200:
-                    log.warning("auto_subscribe_fetch_failed", status=resp.status)
-                    return 0
-                raw_markets = await resp.json()
+        from feeds.gamma_api import fetch_markets
+        raw_markets_norm = []
+        page_size = min(limit, 100)
+        offset = 0
+        while len(raw_markets_norm) < limit:
+            page = await fetch_markets(limit=page_size, active=True, offset=offset)
+            if not page:
+                break
+            raw_markets_norm.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        raw_markets_norm = raw_markets_norm[:limit]
+        # Convert normalised dicts back to raw-like shape for token ID extraction
+        raw_markets = []
+        for m in raw_markets_norm:
+            entry = {"clobTokenIds": m.get("clob_token_ids", [])}
+            if isinstance(entry["clobTokenIds"], str):
+                try:
+                    entry["clobTokenIds"] = orjson.loads(entry["clobTokenIds"])
+                except Exception:
+                    entry["clobTokenIds"] = []
+            # Also try parsing from meta
+            if not entry["clobTokenIds"] and m.get("meta"):
+                try:
+                    meta = orjson.loads(m["meta"]) if isinstance(m["meta"], str) else m["meta"]
+                    entry["clobTokenIds"] = meta.get("clobTokenIds", [])
+                except Exception:
+                    pass
+            raw_markets.append(entry)
     except Exception as exc:
         log.warning("auto_subscribe_fetch_failed", error=str(exc))
         return 0
@@ -444,12 +522,111 @@ async def auto_subscribe_active_markets(ws: websockets.WebSocketClientProtocol, 
     return len(all_token_ids)
 
 
+def get_ws_status() -> dict:
+    """Return WS status for dashboard display."""
+    return {
+        "connected": _ws is not None and not _ws.closed if _ws else False,
+        "subscribed_count": len(_subscribed_markets),
+        "cache_size": len(_orderbooks),
+        "last_message_age": round(time.monotonic() - _last_message_ts, 1) if _last_message_ts > 0 else None,
+        "reconnect_count": _reconnect_count,
+        "uptime": round(time.monotonic() - _connect_time, 1) if _connect_time > 0 else 0,
+    }
+
+
+async def prune_stale_subscriptions(force_count: int = 0) -> None:
+    """Remove subscriptions for tokens no longer in any active market or open position.
+
+    Called periodically to prevent _subscribed_markets from growing unbounded.
+
+    Args:
+        force_count: If >0, force-prune this many subscriptions (LRU) even if still relevant.
+    """
+    global _subscribed_markets
+    if not _subscribed_markets or _ws is None:
+        return
+
+    try:
+        from storage.db import aquery
+
+        # Get all token_ids that are still relevant (active markets + open orders/positions)
+        active_tokens = set()
+
+        # Token IDs from active markets
+        rows = await aquery(
+            "SELECT meta FROM markets WHERE active = true AND meta IS NOT NULL"
+        )
+        for (meta_str,) in (rows or []):
+            try:
+                meta = orjson.loads(meta_str) if isinstance(meta_str, str) else meta_str
+                for tid in meta.get("clobTokenIds", []):
+                    if tid:
+                        active_tokens.add(tid)
+            except Exception:
+                pass
+
+        # Token IDs from open orders/positions (HIGH PRIORITY - never prune)
+        priority_tokens = set()
+        order_rows = await aquery(
+            "SELECT DISTINCT token_id FROM bond_orders WHERE status IN ('pending', 'open')"
+        )
+        for (tid,) in (order_rows or []):
+            priority_tokens.add(tid)
+            active_tokens.add(tid)
+
+        pos_rows = await aquery(
+            "SELECT DISTINCT token_id FROM bond_positions WHERE status IN ('open', 'exiting')"
+        )
+        for (tid,) in (pos_rows or []):
+            priority_tokens.add(tid)
+            active_tokens.add(tid)
+
+        # Token IDs from last scan's bond candidates (MEDIUM PRIORITY)
+        recent_bond_tokens = set()
+        try:
+            from strategies.bond_scanner import _last_scan_candidates
+            recent_bond_tokens = {
+                c["token_id"] for c in _last_scan_candidates
+                if c.get("opportunity_score", 0) >= config.BOND_MIN_SCORE
+            }
+            active_tokens.update(recent_bond_tokens)
+        except Exception:
+            pass
+
+        stale = _subscribed_markets - active_tokens
+
+        # Force-prune additional subscriptions if requested (for cap management)
+        if force_count > 0 and len(stale) < force_count:
+            low_priority = _subscribed_markets - priority_tokens - recent_bond_tokens
+            additional_prune_count = force_count - len(stale)
+            additional_prune = list(low_priority)[:additional_prune_count]
+            stale.update(additional_prune)
+
+        if stale and _ws and not _ws.closed:
+            # Unsubscribe in batches — only evict cache for tokens we actually unsub
+            batch = list(stale)[:100]  # Cap to avoid huge unsubscribe bursts
+            for tid in batch:
+                try:
+                    await unsubscribe_market(_ws, tid)
+                except Exception:
+                    _subscribed_markets.discard(tid)
+                _orderbooks.pop(tid, None)
+
+            log.info("ws_subscriptions_pruned", pruned=len(batch), total_stale=len(stale), remaining=len(_subscribed_markets))
+    except Exception as exc:
+        log.debug("ws_prune_error", error=str(exc))
+
+
 async def health_check() -> bool:
     """Return True if the WS is connected and received data recently."""
     if _ws is None or _ws.closed:
         return False
-    # Consider healthy if we got a message within the last 60 seconds
+    # Consider healthy if we got a message within the last 5 minutes.
+    # Polymarket WS sends sparse data — low-activity markets may go
+    # minutes between messages while the connection is alive via pings.
     if _last_message_ts == 0.0:
-        # Just connected, no messages yet — give it a grace period
+        # Just connected, no messages yet — grace period
+        if _connect_time > 0 and (time.monotonic() - _connect_time) > 300.0:
+            return False
         return True
-    return (time.monotonic() - _last_message_ts) < 120.0
+    return (time.monotonic() - _last_message_ts) < 300.0

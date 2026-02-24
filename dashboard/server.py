@@ -1105,13 +1105,13 @@ _DASHBOARD_HTML = """\
             <tbody>
               <tr><td><strong>Price</strong></td><td>Best ask</td><td class="info-text">Current ask price — cost to buy one share (pays $1 at resolution)</td></tr>
               <tr><td><strong>Yield</strong></td><td>(1 - price) / price &times; 365 / days</td><td class="info-text">Annualized return if held to resolution</td></tr>
-              <tr><td><strong>Score</strong></td><td>Product of 6 factors</td><td class="info-text">Composite opportunity score — all factors multiplied (range 0–1)</td></tr>
+              <tr><td><strong>Score</strong></td><td>Product of 5 factors</td><td class="info-text">Composite opportunity score — all factors multiplied (range 0–1). Spread Efficiency shown for reference but not in score.</td></tr>
               <tr><td><strong>Yield Score</strong></td><td>tanh(yield / scale)</td><td class="info-text">Yield factor with diminishing returns (scale={{ bond_yield_scale }})</td></tr>
               <tr><td><strong>Liquidity</strong></td><td>depth / (depth + scale)</td><td class="info-text">Ask-side depth sigmoid — can you get filled? (half-sat ${{ "%.0f"|format(bond_liquidity_scale) }})</td></tr>
               <tr><td><strong>Time</strong></td><td>exp(-days / tau)</td><td class="info-text">Time to resolution — sooner is better (tau={{ bond_time_tau }}d)</td></tr>
               <tr><td><strong>Exit Liq</strong></td><td>bid / (bid + scale)</td><td class="info-text">Bid-side depth — can you exit if wrong? (half-sat ${{ "%.0f"|format(bond_liquidity_scale) }})</td></tr>
               <tr><td><strong>Mkt Qual</strong></td><td>vol / (vol + scale)</td><td class="info-text">Volume-based trust signal (half-sat ${{ "%.0f"|format(bond_volume_scale) }})</td></tr>
-              <tr><td><strong>Spread</strong></td><td>1 - spread / edge</td><td class="info-text">How much edge survives the bid-ask spread</td></tr>
+              <tr><td><strong>Spread</strong></td><td>spread_penalty(price, spread)</td><td class="info-text">Displayed for reference; removed from composite score (Kelly handles execution risk)</td></tr>
               <tr><td><strong>Size</strong></td><td>Kelly-sized</td><td class="info-text">Computed order size in USD ({{ sizing_formula }})</td></tr>
             </tbody>
           </table>
@@ -1165,9 +1165,10 @@ _DASHBOARD_HTML = """\
 
       <!-- Scoring Engine -->
       <div class="panel panel-wide">
-        <h2>Scoring Engine <span class="badge">6 factors</span></h2>
+        <h2>Scoring Engine <span class="badge">5 factors</span></h2>
         <p class="info-text" style="margin-bottom:1.25rem">
-          Final score = product of all 6 factors (multiplicative &mdash; any low factor drives score toward zero).
+          Final score = product of all 5 factors (multiplicative &mdash; any low factor drives score toward zero).
+          Spread Efficiency is displayed for reference but removed from the composite score (Kelly sizing handles execution risk).
         </p>
         <div class="table-wrap">
           <table class="config-table">
@@ -1203,11 +1204,11 @@ _DASHBOARD_HTML = """\
                 <td>${{ "%.0f"|format(bond_volume_scale) }}</td>
                 <td class="info-text">Higher volume = more trustworthy</td>
               </tr>
-              <tr>
-                <td><strong>Spread Efficiency</strong></td>
+              <tr style="opacity:0.5">
+                <td><strong>Spread Efficiency</strong> <span style="font-size:0.7rem;color:var(--text-muted)">(removed)</span></td>
                 <td>spread_penalty(price, spread)</td>
                 <td style="color:var(--text-muted)">&mdash;</td>
-                <td class="info-text">Edge not consumed by bid-ask spread</td>
+                <td class="info-text">No longer in composite score &mdash; Kelly sizing handles execution risk via slippage adjustment</td>
               </tr>
             </tbody>
           </table>
@@ -1223,7 +1224,6 @@ _DASHBOARD_HTML = """\
           <span class="factor-name">kelly</span> <span class="operator">&times;</span>
           <span class="factor-name">concentration</span> <span class="operator">&times;</span>
           <span class="factor-name">diversification</span> <span class="operator">&times;</span>
-          <span class="factor-name">time_urgency</span> <span class="operator">&times;</span>
           <span class="factor-name">&radic;(score)</span>
         </div>
         <div class="table-wrap">
@@ -1244,11 +1244,6 @@ _DASHBOARD_HTML = """\
                 <td><strong>Diversification</strong></td>
                 <td>1 / (1 + n / {{ bond_div_decay }})</td>
                 <td class="info-text">Diminishing marginal value of each new position</td>
-              </tr>
-              <tr>
-                <td><strong>Time Urgency</strong></td>
-                <td>exp(-days / {{ bond_time_tau_sizing }})</td>
-                <td class="info-text">Approaches 1 near resolution date</td>
               </tr>
               <tr>
                 <td><strong>Max Order</strong></td>
@@ -1757,26 +1752,6 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
     var w=Math.min(40,Math.max(2,Math.round(Math.abs(v)/maxV*40)));
     return '<span class="pnl-bar '+(v>=0?'pnl-bar-pos':'pnl-bar-neg')+'" style="width:'+w+'px"></span>';
   }
-  // -- Portfolio summary calculations --
-  function updatePortfolioSummary(rows, cash, invested){
-    var equity=(cash||0)+(invested||0);
-    var expPct=equity>0?((invested||0)/equity*100):0;
-    var el=document.getElementById('kpi-exposure-pct');if(el)el.textContent=expPct.toFixed(0)+'%';
-    var capPct=equity>0?((invested||0)/equity*100):0;
-    var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
-    var capBar=document.getElementById('kpi-cap-util-bar');
-    if(capBar){capBar.style.width=Math.min(100,capPct)+'%';capBar.style.background=capPct>80?'var(--red)':capPct>50?'var(--yellow)':'var(--accent)';}
-    if(rows.length>0){
-      var totalYield=0,totalDays=0,countDays=0;
-      rows.forEach(function(r){
-        totalYield+=N(r.annualized_yield);
-        if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
-      });
-      var ayEl=document.getElementById('kpi-avg-yield');if(ayEl)ayEl.textContent=(totalYield/rows.length*100).toFixed(1)+'%';
-      var adEl=document.getElementById('kpi-avg-days');if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
-    }
-  }
-
   function renderPositions(rows){
     var el=document.getElementById('positions-table');
     document.getElementById('positions-count').textContent=rows.length;
@@ -1857,10 +1832,16 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       _posData.forEach(function(r){r._age_hours=posAge(r.opened_at).hours;});
       sortData(_posData,_posSortKey,_posSortAsc);
       renderPositions(_posData);
-      // Update summary row from positions data
-      var cashV=parseFloat((document.getElementById('kpi-cash')||{}).textContent||'0');
-      var invV=parseFloat((document.getElementById('kpi-invested')||{}).textContent||'0');
-      updatePortfolioSummary(_posData,cashV,invV);
+      // Update avg yield/days from positions (cash/invested updated from KPI refresh)
+      if(_posData.length>0){
+        var totalYield=0,totalDays=0,countDays=0;
+        _posData.forEach(function(r){
+          totalYield+=N(r.annualized_yield);
+          if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
+        });
+        var ayEl=document.getElementById('kpi-avg-yield');if(ayEl)ayEl.textContent=(totalYield/_posData.length*100).toFixed(1)+'%';
+        var adEl=document.getElementById('kpi-avg-days');if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
+      }
     }).catch(function(){
       document.getElementById('positions-table').innerHTML=errorHtml('Failed to load positions','loadPositions');
       document.getElementById('positions-count').textContent='error';
@@ -2688,7 +2669,6 @@ def create_app() -> FastAPI:
                 wallet_qr=config.POLYMARKET_WALLET_QR,
                 bond_liquidity_scale=config.BOND_LIQUIDITY_SCALE,
                 bond_time_tau=config.BOND_TIME_TAU,
-                bond_time_tau_sizing=config.BOND_TIME_TAU_SIZING,
                 bond_volume_scale=config.BOND_VOLUME_SCALE,
                 bond_yield_scale=config.BOND_YIELD_SCALE,
                 bond_kelly_alpha=config.BOND_KELLY_PRIOR_ALPHA,

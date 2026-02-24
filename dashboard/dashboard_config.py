@@ -15,7 +15,6 @@ def get_module_status() -> dict:
     }
 
 # Dashboard timing — polling intervals (ms)
-PAGE_RELOAD_SEC = 0
 EQUITY_CHART_POLL_MS = 60000
 KPI_POLL_MS = 30000
 POSITIONS_POLL_MS = 30000

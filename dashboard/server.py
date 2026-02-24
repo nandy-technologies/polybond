@@ -588,10 +588,7 @@ _DASHBOARD_HTML = """\
     .config-table th { color:var(--text-muted); font-weight:500; }
     .config-table td:not(:first-child) { font-family: var(--mono); font-size: 0.8rem; }
 
-    /* -- Exposure panel -- */
-    .exposure-layout { display: flex; gap: 24px; flex-wrap: wrap; }
-    .exposure-column { flex: 1; min-width: 200px; }
-    .exposure-column h3 { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; font-family: var(--font); font-weight: 500; }
+    /* Exposure panel removed */
 
     /* -- Micro-interactions -- */
     .tab-content.active { animation: tabFadeIn 0.15s ease-in; }
@@ -1021,7 +1018,7 @@ _DASHBOARD_HTML = """\
             <button class="range-btn range-day-btn active" data-days="7" onclick="setChartRange(7,this)">7D</button>
             <button class="range-btn range-day-btn" data-days="30" onclick="setChartRange(30,this)">30D</button>
             <button class="range-btn range-day-btn" data-days="90" onclick="setChartRange(90,this)">90D</button>
-            <button class="range-btn range-day-btn" data-days="365" onclick="setChartRange(365,this)">All</button>
+            <button class="range-btn range-day-btn" data-days="9999" onclick="setChartRange(9999,this)">All</button>
           </div>
         </div>
         <div class="chart-container bal-chart-wrap" id="chart-wrap">
@@ -1107,7 +1104,7 @@ _DASHBOARD_HTML = """\
               <tr><td><strong>Exit Liq</strong></td><td>bid / (bid + scale)</td><td class="info-text">Bid-side depth — can you exit if wrong? (half-sat ${{ "%.0f"|format(bond_liquidity_scale) }})</td></tr>
               <tr><td><strong>Mkt Qual</strong></td><td>vol / (vol + scale)</td><td class="info-text">Volume-based trust signal (half-sat ${{ "%.0f"|format(bond_volume_scale) }})</td></tr>
               <tr><td><strong>Spread</strong></td><td>spread_penalty(price, spread)</td><td class="info-text">Displayed for reference; removed from composite score (Kelly handles execution risk)</td></tr>
-              <tr><td><strong>Size</strong></td><td>Kelly-sized</td><td class="info-text">Computed order size in USD ({{ sizing_formula }})</td></tr>
+              <tr><td><strong>Order $</strong></td><td>Kelly-sized</td><td class="info-text">Computed order size in USD ({{ sizing_formula }})</td></tr>
             </tbody>
           </table>
         </div>
@@ -1322,26 +1319,12 @@ _DASHBOARD_HTML = """\
         </div>
       </div>
 
-      <div class="panel panel-wide">
-        <h2>Portfolio Exposure</h2>
-        <div id="exposure-panel" class="exposure-layout">
-          <div class="exposure-column">
-            <h3>By Category</h3>
-            <div id="exposure-categories">Loading...</div>
-          </div>
-          <div class="exposure-column">
-            <h3>By Event</h3>
-            <div id="exposure-events">Loading...</div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </div>
 
   <footer>
     <span>{{ uptime }}</span> &middot;
-    <span>Last rendered {{ rendered_at }}</span> &middot;
+    <span id="footer-rendered">Last rendered {{ rendered_at }}</span> &middot;
     <a href="https://nandytech.net" target="_blank" rel="noopener noreferrer">Nandy Universe</a>
   </footer>
 
@@ -1390,7 +1373,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       localStorage.setItem('activeTab', tab.dataset.tab);
       if(tab.dataset.tab==='opportunities'&&!_oppsLoaded){loadOpportunities();_oppsLoaded=true;}
       if(tab.dataset.tab==='watchlist'&&!_watchLoaded){loadWatchlist();_watchLoaded=true;}
-      if(tab.dataset.tab==='strategy'){loadExposure();}
+      // strategy tab — no lazy-load needed
     });
   });
   // Restore saved tab on load
@@ -1539,23 +1522,6 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   }
   function errorHtml(msg,retryFn){
     return '<div class="error-state">'+htmlEscape(msg||'Failed to load data')+'<br><button class="retry-btn" onclick="'+retryFn+'()">Retry</button></div>';
-  }
-
-  // -- Exposure panel --
-  function loadExposure(){
-    fetchWithTimeout(apiUrl('/api/bonds/exposure')).then(function(r){return r.json()}).then(function(d){
-      var catEl=document.getElementById('exposure-categories');
-      var evtEl=document.getElementById('exposure-events');
-      if(!d.categories||d.categories.length===0){catEl.innerHTML='<span style="color:var(--text-muted)">No open positions</span>';}
-      else{catEl.innerHTML=d.categories.map(function(c){return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+htmlEscape(c.name)+'</span><span>$'+N(c.exposure).toFixed(2)+'</span></div>'}).join('');}
-      if(!d.events||d.events.length===0){evtEl.innerHTML='<span style="color:var(--text-muted)">No open positions</span>';}
-      else{evtEl.innerHTML=d.events.slice(0,{{ exposure_events_limit }}).map(function(e){return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+htmlEscape(e.name)+'</span><span>$'+N(e.exposure).toFixed(2)+'</span></div>'}).join('');}
-    }).catch(function(){
-      var catEl=document.getElementById('exposure-categories');
-      var evtEl=document.getElementById('exposure-events');
-      if(catEl)catEl.innerHTML='<span style="color:var(--red)">Failed to load</span>';
-      if(evtEl)evtEl.innerHTML='<span style="color:var(--red)">Failed to load</span>';
-    });
   }
 
   // -- Equity chart (update pattern, no destroy/recreate) --
@@ -1738,6 +1704,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       }
       document.getElementById('header-positions').textContent=(d.position_count||0)+' positions';
       document.getElementById('header-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC)+'</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>'+wPol.toFixed(4)+'<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span>';
+      var frEl=document.getElementById('footer-rendered');if(frEl)frEl.textContent='Last updated '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})+' ET';
     }).catch(function(err){
       console.warn('KPI refresh failed:', err);
     });
@@ -1912,7 +1879,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     document.getElementById('history-count').textContent=rows.length;
     if(!rows.length){el.innerHTML='<div class="empty-state">No resolved positions yet.</div>';return;}
     var maxPnl=Math.max.apply(null,rows.map(function(r){return Math.abs(N(r.realized_pnl))||1;}));
-    var cols=[{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Size',key:'cost_basis',num:true},{label:'P&L',key:'realized_pnl',num:true},{label:'Result',key:'status'},{label:'Closed',key:'closed_at'}];
+    var cols=[{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Cost',key:'cost_basis',num:true},{label:'P&L',key:'realized_pnl',num:true},{label:'Result',key:'status'},{label:'Closed',key:'closed_at'}];
     var html='<div class="table-wrap"><table class="portfolio-sortable" id="hist-tbl"><thead><tr>';
     cols.forEach(function(c){
       var arrow='';
@@ -2048,7 +2015,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       {label:'Score',key:'opportunity_score',num:true},{label:'Yield Score',key:'yield_score',num:true,factor:true,title:'tanh(yield / scale)'},
       {label:'Liquidity',key:'liquidity_score',num:true,factor:true,title:'tanh(depth / scale)'},{label:'Time',key:'time_value',num:true,factor:true,title:'exp(-days / tau)'},
       {label:'Exit Liq',key:'exit_liquidity',num:true,factor:true,title:'Exit liquidity (bid depth)'},{label:'Mkt Qual',key:'market_quality',num:true,factor:true,title:'Volume & spread quality'},
-      {label:'Spread',key:'spread_efficiency',num:true,factor:true,title:'1 - spread/price'},{label:'Size',key:'computed_size',num:true}
+      {label:'Spread',key:'spread_efficiency',num:true,factor:true,title:'1 - spread/price'},{label:'Order $',key:'computed_size',num:true}
     ];
     var html='<div class="table-wrap"><table id="opps-tbl"><thead><tr>';
     cols.forEach(function(c,idx){
@@ -2731,7 +2698,7 @@ def create_app() -> FastAPI:
                 drawdown_warn_pct=DRAWDOWN_WARN_PCT,
                 fetch_timeout_ms=FETCH_TIMEOUT_MS,
                 min_buyable_usd=MIN_BUYABLE_USD,
-                exposure_events_limit=EXPOSURE_EVENTS_LIMIT,
+                # exposure panel removed
             )
             _index_cache["html"] = rendered
             _index_cache["ts"] = time.monotonic()

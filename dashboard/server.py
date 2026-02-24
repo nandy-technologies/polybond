@@ -777,12 +777,9 @@ _DASHBOARD_HTML = """\
     #opps-tbl th:nth-child(8), #opps-tbl td:nth-child(8) { border-left: 1px solid var(--accent-15); background: var(--accent-04); }
     #opps-tbl th:nth-child(15), #opps-tbl td:nth-child(15) { border-left: 1px solid var(--accent-15); }
 
-    .table-wrap::after {
-      content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 24px;
-      background: linear-gradient(90deg, transparent, var(--surface));
-      pointer-events: none; opacity: 0; transition: opacity 0.2s ease;
+    .table-wrap.scrolled {
+      box-shadow: inset -24px 0 16px -16px var(--surface);
     }
-    .table-wrap.scrolled::after { opacity: 1; }
 
     .config-table tbody tr { transition: background var(--ease-default); }
 

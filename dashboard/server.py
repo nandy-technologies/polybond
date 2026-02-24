@@ -357,9 +357,15 @@ _DASHBOARD_HTML = """\
     .stat-card {
       background: var(--bg); border-radius: var(--radius-lg); padding: 1.25rem 1rem; text-align: center;
       border: 1px solid var(--border); transition: border-color var(--ease-default), transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow var(--ease-default);
+      position: relative; overflow: hidden;
     }
-    .stat-card:hover { border-color: var(--accent-20); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-    .stat-card .value { font-size: 1.5rem; font-weight: 700; font-family: var(--mono); color: var(--text-bright); line-height: 1.2; }
+    .stat-card:hover { border-color: var(--accent-20); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+    .stat-card .value {
+      font-size: 1.5rem; font-weight: 700; font-family: var(--mono); color: var(--text-bright); line-height: 1.2;
+      transition: transform 0.3s ease, color 0.3s ease;
+    }
+    .stat-card .value.value-flash { animation: valueFlash 0.6s ease; }
+    @keyframes valueFlash { 0% { transform: scale(1); } 30% { transform: scale(1.05); } 100% { transform: scale(1); } }
     .stat-card .label {
       font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;
       letter-spacing: 0.15em; margin-top: 0.5rem; font-weight: 700;
@@ -369,9 +375,10 @@ _DASHBOARD_HTML = """\
     .stat-card-hero {
       border-color: var(--accent-25);
       border-top: 2px solid var(--accent-30);
-      box-shadow: 0 0 16px var(--accent-06);
+      box-shadow: 0 0 20px var(--accent-06);
     }
-    .stat-card-hero .value { font-size: 1.75rem; }
+    .stat-card-hero .value { font-size: 2rem; letter-spacing: -0.02em; }
+    .stat-card-hero .label { font-size: 0.75rem; letter-spacing: 0.2em; }
     .stat-card-scan .value { font-size: 0.85rem; font-family: var(--mono); color: var(--text-muted); line-height: 1.4; }
 
     /* -- KPI tiered layout -- */
@@ -382,6 +389,21 @@ _DASHBOARD_HTML = """\
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 0.75rem;
     }
     .kpi-primary-row .stat-card { padding: 1rem 0.85rem; }
+    .kpi-primary-row .stat-card .value { font-size: 1.6rem; }
+
+    /* -- Portfolio summary row -- */
+    .kpi-summary-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem;
+      margin-bottom: 0.75rem; padding: 0.75rem; background: var(--accent-04);
+      border: 1px solid var(--accent-15); border-radius: var(--radius-lg);
+    }
+    .kpi-summary-row .stat-card {
+      padding: 0.5rem 0.5rem; background: transparent; border: none;
+    }
+    .kpi-summary-row .stat-card:hover { transform: none; box-shadow: none; }
+    .kpi-summary-row .stat-card .value { font-size: 1rem; color: var(--accent); }
+    .kpi-summary-row .stat-card .label { font-size: 0.6rem; letter-spacing: 0.1em; margin-top: 0.25rem; }
+
     .kpi-secondary-row {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.75rem;
     }
@@ -392,6 +414,34 @@ _DASHBOARD_HTML = """\
     .kpi-secondary-row .stat-card .label { font-size: 0.65rem; letter-spacing: 0.12em; }
     .kpi-secondary-row .stat-card:hover { transform: none; border-color: var(--border); }
     .kpi-secondary-row .stat-card-scan .value { font-size: 0.85rem; font-family: var(--mono); color: var(--text-muted); line-height: 1.4; }
+
+    /* -- Capital utilization bar -- */
+    .cap-util-wrap { margin-top: 6px; }
+    .cap-util-track { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .cap-util-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease, background 0.3s ease; }
+    .cap-util-label { font-size: 0.6rem; color: var(--text-muted); font-family: var(--mono); margin-top: 2px; }
+
+    /* -- Freshness indicator -- */
+    .freshness-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }
+    .freshness-fresh { background: var(--green); box-shadow: 0 0 4px var(--green-30); }
+    .freshness-stale { background: var(--yellow); box-shadow: 0 0 4px var(--yellow-30); }
+    .freshness-dead { background: var(--red); box-shadow: 0 0 4px var(--red-30); animation: pulse 1.5s ease-in-out infinite; }
+
+    /* -- Status dot for positions -- */
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    .status-dot-open { background: var(--green); box-shadow: 0 0 4px var(--green-30); }
+    .status-dot-exiting { background: var(--yellow); box-shadow: 0 0 4px var(--yellow-30); animation: pulse 1.5s ease-in-out infinite; }
+
+    /* -- Expandable position rows -- */
+    .pos-expand-row { display: none; }
+    .pos-expand-row.expanded { display: table-row; }
+    .pos-expand-row td { padding: 0.75rem 1rem; background: var(--accent-04); border-left: 2px solid var(--accent-30); }
+    .pos-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem 1.5rem; }
+    .pos-detail-item { font-size: 0.8rem; }
+    .pos-detail-label { color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; }
+    .pos-detail-value { font-family: var(--mono); color: var(--text); margin-top: 2px; }
+    .pos-row-clickable { cursor: pointer; }
+    .pos-row-clickable:hover td:first-child { color: var(--accent); }
 
     /* -- Drawdown gauge -- */
     .drawdown-gauge { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -487,7 +537,7 @@ _DASHBOARD_HTML = """\
 
     /* -- Charts -- */
     .chart-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-    .chart-container { position: relative; height: 280px; width: 100%; }
+    .chart-container { position: relative; height: 360px; width: 100%; }
     .panel-chart { border-top: 2px solid var(--accent-20); padding-top: 1.5rem; }
     .panel-chart .chart-header { margin-bottom: 12px; }
     .chart-title {
@@ -546,7 +596,7 @@ _DASHBOARD_HTML = """\
     /* -- Micro-interactions -- */
     .tab-content.active { animation: tabFadeIn 0.15s ease-in; }
     @keyframes tabFadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
-    table tbody tr:nth-child(even):not(.event-header):not(.event-child) { background: var(--surface-hover); }
+    table tbody tr:nth-child(even):not(.event-header):not(.event-child):not(.pos-expand-row) { background: var(--surface-hover); }
     /* hover states */
     a:hover { color: var(--accent-hover); }
     .retry-btn:hover { background: var(--accent-10); border-color: var(--accent); }
@@ -754,7 +804,9 @@ _DASHBOARD_HTML = """\
       .panel { padding: 1rem; }
       .kpi-hero-row { grid-template-columns: 1fr; }
       .kpi-primary-row { grid-template-columns: repeat(2, 1fr); }
+      .kpi-summary-row { grid-template-columns: repeat(2, 1fr); }
       .trade-btn { padding: 6px 12px; font-size: 0.75rem; }
+      .pos-detail-grid { grid-template-columns: 1fr 1fr; }
       #opps-tbl th:nth-child(13), #opps-tbl td:nth-child(13),
       #opps-tbl th:nth-child(14), #opps-tbl td:nth-child(14) { display: none; }
     }
@@ -769,7 +821,10 @@ _DASHBOARD_HTML = """\
       .stat-card .label { font-size: 0.65rem; }
       .stat-card-hero .value { font-size: 1.35rem; }
       .kpi-hero-row { grid-template-columns: 1fr; }
+      .kpi-summary-row { grid-template-columns: repeat(2, 1fr); padding: 0.5rem; }
       .kpi-secondary-row .stat-card .value { font-size: 0.95rem; }
+      .chart-container { height: 260px; }
+      .pos-detail-grid { grid-template-columns: 1fr; }
       .panel { padding: 0.875rem; }
       .panel h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
       .chart-container { height: 220px; }
@@ -910,6 +965,31 @@ _DASHBOARD_HTML = """\
             <div class="label">Win Rate</div>
           </div>
         </div>
+        <div class="kpi-summary-row" id="kpi-summary-row">
+          <div class="stat-card">
+            <div class="value" id="kpi-exposure-pct">&mdash;</div>
+            <div class="label">Exposure</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-avg-yield">&mdash;</div>
+            <div class="label">Avg Yield</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-avg-days">&mdash;</div>
+            <div class="label">Avg Days Left</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-cap-util">&mdash;</div>
+            <div class="label">Capital Util</div>
+            <div class="cap-util-wrap">
+              <div class="cap-util-track"><div class="cap-util-fill" id="kpi-cap-util-bar" style="width:0%;background:var(--accent)"></div></div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-scan-stats"><span class="freshness-dot freshness-dead"></span>&mdash;</div>
+            <div class="label">Last Scan</div>
+          </div>
+        </div>
         <div class="kpi-secondary-row">
           <div class="stat-card">
             <div class="value" id="kpi-positions">{{ overview.position_count }}</div>
@@ -930,10 +1010,6 @@ _DASHBOARD_HTML = """\
               <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > 15 else 'dd-warn' if overview.drawdown_pct > 5 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct * 100 / 30, 100] | min }}%"></div></div>
               <span class="drawdown-label" id="kpi-drawdown-limit">/ {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}%</span>
             </div>
-          </div>
-          <div class="stat-card stat-card-scan">
-            <div class="value" id="kpi-scan-stats">&mdash;</div>
-            <div class="label">Last Scan</div>
           </div>
         </div>
       </div>
@@ -1601,6 +1677,16 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   loadEquityChart();
   setInterval(loadEquityChart,{{ equity_poll_ms }});
 
+  // -- Value flash on change --
+  var _prevKpiVals={};
+  function flashIfChanged(id,newVal){
+    if(_prevKpiVals[id]!==undefined&&_prevKpiVals[id]!==newVal){
+      var el=document.getElementById(id);
+      if(el){el.classList.remove('value-flash');void el.offsetWidth;el.classList.add('value-flash');}
+    }
+    _prevKpiVals[id]=newVal;
+  }
+
   // -- KPI auto-refresh (always update text, CSS handles blur) --
   function refreshKPIs(){
     if(_tabHidden)return;
@@ -1610,8 +1696,10 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       var wOC=d.wallet_usdc_onchain!=null?d.wallet_usdc_onchain:0;
       var wEx=d.wallet_usdc!=null?d.wallet_usdc:0;
       var wPol=d.wallet_pol!=null?d.wallet_pol:0;
+      flashIfChanged('kpi-wallet',fmtMoney(wOC+wEx));
       document.getElementById('kpi-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC+wEx)+'</span>';
       document.getElementById('kpi-wallet-sub').textContent=fmtMoney(wOC)+' on-chain \u00b7 '+fmtMoney(wEx)+' exchange \u00b7 '+wPol.toFixed(4)+' POL';
+      flashIfChanged('kpi-pnl',netPnl.toFixed(2));
       document.getElementById('kpi-pnl').innerHTML='<span class="bal-val">'+(netPnl>=0?'+$':'-$')+Math.abs(netPnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>';
       document.getElementById('kpi-pnl').className='value '+pnlClass(netPnl);
       var rpnl=d.realized_pnl||0;var upnl=d.unrealized_pnl||0;
@@ -1627,9 +1715,22 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       var dailyEl=document.getElementById('kpi-daily-orders');if(dailyEl){var filled=d.daily_orders_filled||0;dailyEl.textContent=filled+'/'+(d.daily_orders_max||0);}
       var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}?'pnl-negative':ddPct>{{ drawdown_warn_pct }}?'pnl-warn':'');}
       var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct*100/30)+'%';ddBar.className='drawdown-fill '+(ddPct>15?'dd-danger':ddPct>5?'dd-warn':'dd-ok');}
+      // Capital utilization
+      var cash_total=N(d.cash);var inv_total=N(d.invested);var eq_total=cash_total+inv_total;
+      var capPct=eq_total>0?(inv_total/eq_total*100):0;
+      var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
+      var capBar=document.getElementById('kpi-cap-util-bar');
+      if(capBar){capBar.style.width=Math.min(100,capPct)+'%';capBar.style.background=capPct>80?'var(--red)':capPct>50?'var(--yellow)':'var(--accent)';}
+      var expEl=document.getElementById('kpi-exposure-pct');if(expEl)expEl.textContent=(eq_total>0?(inv_total/eq_total*100):0).toFixed(0)+'%';
+
+      // Scan stats with freshness
       var ss=d.scan_stats||{};
       var scanEl=document.getElementById('kpi-scan-stats');
-      if(scanEl&&ss.scanned_at){scanEl.textContent=(ss.candidates_found||0)+' candidates / '+(ss.markets_scanned||0)+' mkts \u2014 '+relTime(ss.scanned_at);}
+      if(scanEl&&ss.scanned_at){
+        var scanDate=new Date(ss.scanned_at);var scanAge=(Date.now()-scanDate.getTime())/1000;
+        var fCls=scanAge<60?'freshness-fresh':scanAge<300?'freshness-stale':'freshness-dead';
+        scanEl.innerHTML='<span class="freshness-dot '+fCls+'"></span>'+(ss.candidates_found||0)+' / '+(ss.markets_scanned||0)+' mkts \u2014 '+relTime(ss.scanned_at);
+      }
       document.getElementById('header-positions').textContent=(d.position_count||0)+' positions';
       document.getElementById('header-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC)+'</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>'+wPol.toFixed(4)+'<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span>';
     }).catch(function(err){
@@ -1656,12 +1757,32 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
     var w=Math.min(40,Math.max(2,Math.round(Math.abs(v)/maxV*40)));
     return '<span class="pnl-bar '+(v>=0?'pnl-bar-pos':'pnl-bar-neg')+'" style="width:'+w+'px"></span>';
   }
+  // -- Portfolio summary calculations --
+  function updatePortfolioSummary(rows, cash, invested){
+    var equity=(cash||0)+(invested||0);
+    var expPct=equity>0?((invested||0)/equity*100):0;
+    var el=document.getElementById('kpi-exposure-pct');if(el)el.textContent=expPct.toFixed(0)+'%';
+    var capPct=equity>0?((invested||0)/equity*100):0;
+    var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
+    var capBar=document.getElementById('kpi-cap-util-bar');
+    if(capBar){capBar.style.width=Math.min(100,capPct)+'%';capBar.style.background=capPct>80?'var(--red)':capPct>50?'var(--yellow)':'var(--accent)';}
+    if(rows.length>0){
+      var totalYield=0,totalDays=0,countDays=0;
+      rows.forEach(function(r){
+        totalYield+=N(r.annualized_yield);
+        if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
+      });
+      var ayEl=document.getElementById('kpi-avg-yield');if(ayEl)ayEl.textContent=(totalYield/rows.length*100).toFixed(1)+'%';
+      var adEl=document.getElementById('kpi-avg-days');if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
+    }
+  }
+
   function renderPositions(rows){
     var el=document.getElementById('positions-table');
     document.getElementById('positions-count').textContent=rows.length;
     if(!rows.length){el.innerHTML='<div class="empty-state">No open positions \u2014 scanner will find opportunities.</div>';return;}
     var maxPnl=Math.max.apply(null,rows.map(function(r){return Math.abs(N(r.unrealized_pnl))||1;}));
-    var cols=[{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Now',key:'current_price',num:true},{label:'Yield',key:'annualized_yield',num:true},{label:'Cost',key:'cost_basis',num:true},{label:'Shares',key:'shares',num:true},{label:'P&L',key:'unrealized_pnl',num:true},{label:'Age',key:'_age_hours',num:true},{label:'Expires',key:'end_date'},{label:'',key:null}];
+    var cols=[{label:'',key:null},{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Now',key:'current_price',num:true},{label:'Yield',key:'annualized_yield',num:true},{label:'Cost',key:'cost_basis',num:true},{label:'Shares',key:'shares',num:true},{label:'P&L',key:'unrealized_pnl',num:true},{label:'Age',key:'_age_hours',num:true},{label:'Expires',key:'end_date'},{label:'',key:null}];
     var html='<div class="table-wrap"><table class="portfolio-sortable" id="pos-tbl"><thead><tr>';
     cols.forEach(function(c){
       var arrow='';
@@ -1672,10 +1793,14 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       html+='<th'+(c.num?' class="num"':'')+(c.key?' data-sort="'+c.key+'"':'')+'>'+c.label+arrow+'</th>';
     });
     html+='</tr></thead><tbody>';
-    rows.forEach(function(r){
+    rows.forEach(function(r,idx){
       var qText=htmlEscape(truncate(r.question,60));
       var qFull=htmlEscape(r.question||'');
-      html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
+      var posStatus=r.status||'open';
+      var statusDot='<span class="status-dot status-dot-'+posStatus+'"></span>';
+      html+='<tr class="pos-row-clickable" data-pidx="'+idx+'">';
+      html+='<td style="width:20px;padding-right:0">'+statusDot+'</td>';
+      html+='<td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
       html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
       html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
       html+='<td class="num">'+N(r.current_price).toFixed(3)+'</td>';
@@ -1687,11 +1812,32 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       var age=posAge(r.opened_at);
       html+='<td class="num"><span class="age-badge '+age.cls+'">'+age.text+'</span></td>';
       html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
-      var posStatus=r.status||'open';
-      html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="exitPosition(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',this)">Exit</button>')+'</td></tr>';
+      html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="event.stopPropagation();exitPosition(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',this)">Exit</button>')+'</td></tr>';
+      // Expandable detail row
+      var pLink=r.slug?'https://polymarket.com/event/'+(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+r.slug:''):'';
+      html+='<tr class="pos-expand-row" data-pidx="'+idx+'"><td colspan="'+cols.length+'">';
+      html+='<div class="pos-detail-grid">';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Market ID</div><div class="pos-detail-value" style="font-size:0.7rem;word-break:break-all">'+htmlEscape(r.market_id||'')+'</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Token ID</div><div class="pos-detail-value" style="font-size:0.7rem;word-break:break-all">'+htmlEscape(r.token_id||'').substring(0,20)+'...</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Entry Price</div><div class="pos-detail-value">$'+N(r.entry_price).toFixed(4)+'</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Current Price</div><div class="pos-detail-value">$'+N(r.current_price).toFixed(4)+'</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Cost Basis</div><div class="pos-detail-value">'+fmtMoney(N(r.cost_basis))+'</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Ann. Yield</div><div class="pos-detail-value accent-gold">'+(N(r.annualized_yield)*100).toFixed(2)+'%</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">Opened</div><div class="pos-detail-value">'+(r.opened_at?new Date(r.opened_at).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'\u2014')+'</div></div>';
+      html+='<div class="pos-detail-item"><div class="pos-detail-label">End Date</div><div class="pos-detail-value">'+(r.end_date?new Date(r.end_date).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}):'\u2014')+'</div></div>';
+      if(pLink)html+='<div class="pos-detail-item"><div class="pos-detail-label">Market Link</div><div class="pos-detail-value"><a href="'+pLink+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">View on Polymarket \u2197</a></div></div>';
+      html+='</div></td></tr>';
     });
     html+='</tbody></table></div>';
     el.innerHTML=html;attachScrollFade(el);
+    // Click to expand
+    el.querySelectorAll('.pos-row-clickable').forEach(function(tr){
+      tr.addEventListener('click',function(){
+        var idx=tr.dataset.pidx;
+        var detail=el.querySelector('.pos-expand-row[data-pidx="'+idx+'"]');
+        if(detail)detail.classList.toggle('expanded');
+      });
+    });
     var thead=document.querySelector('#pos-tbl thead');
     if(thead)thead.onclick=function(e){
       var th=e.target.closest('th');var key=th?th.dataset.sort:null;
@@ -1711,6 +1857,10 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       _posData.forEach(function(r){r._age_hours=posAge(r.opened_at).hours;});
       sortData(_posData,_posSortKey,_posSortAsc);
       renderPositions(_posData);
+      // Update summary row from positions data
+      var cashV=parseFloat((document.getElementById('kpi-cash')||{}).textContent||'0');
+      var invV=parseFloat((document.getElementById('kpi-invested')||{}).textContent||'0');
+      updatePortfolioSummary(_posData,cashV,invV);
     }).catch(function(){
       document.getElementById('positions-table').innerHTML=errorHtml('Failed to load positions','loadPositions');
       document.getElementById('positions-count').textContent='error';

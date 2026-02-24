@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polybonds</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="apple-touch-icon" href="/static/favicon-180.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700&family=Lora:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body class="bal-hidden">
+<nav id="nandy-nav">
+  <a class="nn-brand" href="/"><img class="nn-logo" src="/static/tribal-logo-transparent.png" alt="Nandy"></a>
+  <script>(function(){
+    var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';
+    document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;
+    var n=document.getElementById('nandy-nav');
+    var ls=[['Universe',9090],['HYPE Bot',8082],['Polybonds',8083]];
+    ls.forEach(function(d){
+      var a=document.createElement('a');a.className='nn-link';
+      a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];
+      if(location.port==d[1])a.classList.add('nn-active');
+      n.appendChild(a);
+    });
+    var dd=document.createElement('div');dd.className='nn-dropdown';
+    var games=[['Tide Pools',8084]];
+    var isGA=games.some(function(g){return location.port==g[1]});
+    var tog=document.createElement('button');
+    tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');
+    tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';
+    dd.appendChild(tog);
+    var mn=document.createElement('div');mn.className='nn-dropdown-menu';
+    games.forEach(function(g){
+      var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];
+      if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a);
+    });
+    dd.appendChild(mn);n.appendChild(dd);
+    var ws=document.createElement('a');ws.className='nn-link';
+    ws.href='https://nandytech.net';ws.target='_blank';ws.rel='noopener noreferrer';ws.textContent='Website';
+    ws.style.marginLeft='auto';n.appendChild(ws);
+    tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});
+    document.addEventListener('click',function(){dd.classList.remove('open')});
+  })();</script>
+</nav>
+
+  <div id="trading-paused-banner">TRADING PAUSED &mdash; Bot is not placing new orders</div>
+
+  <header>
+    <div class="header-left">
+      <h1>Polybonds</h1>
+      <span class="live-dot {% if overall_status == 'degraded' %}dot-warn{% elif overall_status == 'down' %}dot-err{% endif %}"></span>
+      <span class="badge status-{{ overall_status }}">{{ overall_status }}</span>
+      <span id="header-clock" class="header-clock"></span>
+    </div>
+    {% if wallet_address %}
+    <div class="header-center">
+      <span class="wallet-addr" id="wallet-copy-btn" title="Click to copy wallet address">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        <span id="wallet-addr-text">{{ wallet_address[:6] }}...{{ wallet_address[-4:] }}</span>
+      </span>
+      <span class="wallet-links">
+        <a href="https://polygonscan.com/address/{{ wallet_address }}" target="_blank" rel="noopener noreferrer" title="View on Polygonscan">Scan</a>
+        <button class="wallet-link-btn" id="wallet-qr-btn" title="Show QR code &amp; funding info">QR</button>
+      </span>
+    </div>
+    {% endif %}
+    <div class="header-right">
+      <span class="header-meta" style="font-size:0.9rem;color:var(--text-bright)" id="header-wallet"><span class="bal-val">${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }}</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>{{ "{:,.4f}".format(overview.wallet_pol or 0) }}<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span></span>
+      <span class="header-meta" id="header-positions">{{ overview.position_count }} positions</span>
+      <label class="bal-toggle" title="Show dollar amounts"><input type="checkbox" id="bal-cb"><span class="bal-switch"></span><span>Balances</span></label>
+      <div class="header-toggle-sep"></div>
+      <div class="bot-toggle-wrap-header">
+        <span class="bot-toggle-label">Trading</span>
+        <button class="bot-toggle-btn" id="bot-toggle-btn" title="Toggle trading"><span class="sr-only">Toggle trading</span></button>
+        <span class="bot-toggle-status" id="bot-toggle-status"></span>
+      </div>
+    </div>
+  </header>
+
+  {% if wallet_address %}
+  <div class="wallet-modal-overlay" id="wallet-modal" role="dialog" aria-modal="true" aria-label="Wallet details">
+    <div class="wallet-modal">
+      <h3>Fund Wallet</h3>
+      {% if wallet_qr %}<div class="qr-wrap"><img src="{{ wallet_qr }}" alt="Wallet QR" width="160" height="160"></div>{% endif %}
+      <div class="full-addr" id="wallet-full-addr" title="Click to copy">{{ wallet_address }}</div>
+      <div class="fund-hint">
+        Send <strong>USDC.e</strong> and a small amount of <strong>POL</strong> (for gas) on the <strong>Polygon</strong> network to this address.
+      </div>
+      <button class="close-btn" id="wallet-modal-close">Close</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="copy-toast" id="copy-toast">Copied to clipboard</div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="portfolio">Portfolio</button>
+    <button class="tab" data-tab="opportunities">Opportunities</button>
+    <button class="tab" data-tab="watchlist">Watchlist</button>
+    <button class="tab" data-tab="strategy">Strategy</button>
+  </nav>
+
+  <!-- =========== PORTFOLIO TAB =========== -->
+  <div class="tab-content active" id="tab-portfolio">
+    <div class="grid">
+      <!-- KPI Row -->
+      <div class="panel panel-wide panel-hero">
+        <h2>Key Metrics</h2>
+        <div class="kpi-hero-row">
+          <div class="stat-card stat-card-hero">
+            <div class="value" id="kpi-wallet"><span class="bal-val">${{ "{:,.2f}".format((overview.wallet_usdc_onchain or 0) + (overview.wallet_usdc or 0)) }}</span></div>
+            <div class="label">Wallet</div>
+            <div class="sublabel" id="kpi-wallet-sub">${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }} on-chain · ${{ "{:,.2f}".format(overview.wallet_usdc or 0) }} exchange · {{ "{:,.4f}".format(overview.wallet_pol or 0) }} POL</div>
+          </div>
+          <div class="stat-card stat-card-hero">
+            {% set net_pnl = overview.realized_pnl + overview.unrealized_pnl %}
+            <div class="value {{ 'pnl-positive' if net_pnl > 0 else 'pnl-negative' if net_pnl < 0 else '' }}" id="kpi-pnl"><span class="bal-val">{{ "+" if net_pnl >= 0 else "-" }}${{ "{:,.2f}".format(net_pnl|abs) }}</span></div>
+            <div class="label">Net P&amp;L</div>
+            <div class="sublabel" id="kpi-pnl-sub">{{ "+" if overview.realized_pnl >= 0 else "-" }}${{ "{:,.2f}".format(overview.realized_pnl|abs) }} realized · {{ "+" if overview.unrealized_pnl >= 0 else "-" }}${{ "{:,.2f}".format(overview.unrealized_pnl|abs) }} unrealized</div>
+          </div>
+        </div>
+        <div class="kpi-primary-row">
+          <div class="stat-card accent-gold">
+            <div class="value" id="kpi-yield">{{ "%.1f"|format(overview.annualized_yield * 100) }}%</div>
+            <div class="label">Ann. Yield</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-cash"><span class="bal-val">${{ "{:,.2f}".format(overview.cash) }}</span></div>
+            <div class="label">Cash</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-invested"><span class="bal-val">${{ "{:,.2f}".format(overview.invested) }}</span></div>
+            <div class="label">Invested</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-winrate">{{ "%.0f"|format(overview.win_rate * 100) }}%</div>
+            <div class="label" title="Resolved wins / (wins + losses). Manual exits excluded.">Win Rate</div>
+          </div>
+        </div>
+        <div class="kpi-summary-row" id="kpi-summary-row">
+          <div class="stat-card">
+            <div class="value" id="kpi-avg-yield">&mdash;</div>
+            <div class="label">Avg Yield</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-avg-days">&mdash;</div>
+            <div class="label">Avg Days Left</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-cap-util">&mdash;</div>
+            <div class="label">Capital Util</div>
+            <div class="cap-util-wrap">
+              <div class="cap-util-track"><div class="cap-util-fill" id="kpi-cap-util-bar" style="width:0%;background:var(--accent)"></div></div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-scan-stats"><span class="freshness-dot freshness-dead"></span>&mdash;</div>
+            <div class="label">Last Scan</div>
+          </div>
+        </div>
+        <div class="kpi-secondary-row">
+          <div class="stat-card">
+            <div class="value" id="kpi-positions">{{ overview.position_count }}</div>
+            <div class="label">Positions</div>
+          </div>
+          <div class="stat-card">
+            <div class="value {{ 'pnl-positive' if overview.wins > overview.losses else 'pnl-negative' if overview.losses > overview.wins else '' }}" id="kpi-record">{{ overview.wins }}W / {{ overview.losses }}L</div>
+            <div class="label">Record</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="kpi-daily-orders">{{ overview.daily_orders_filled }}/{{ overview.daily_orders_max }}</div>
+            <div class="label">Orders Today</div>
+          </div>
+          <div class="stat-card" id="kpi-drawdown-card">
+            <div class="value" id="kpi-drawdown">{{ "%.1f"|format(overview.drawdown_pct) }}%</div>
+            <div class="label">Drawdown</div>
+            <div class="drawdown-gauge">
+              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > bond_halt_drawdown_pct * 75 else 'dd-warn' if overview.drawdown_pct > bond_halt_drawdown_pct * 25 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct / (bond_halt_drawdown_pct * 100) * 100, 100] | min }}%"></div></div>
+              <span class="drawdown-label" id="kpi-drawdown-limit">/ {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Equity Curve -->
+      <div class="panel panel-wide panel-chart">
+        <div class="chart-header">
+          <span class="chart-title">Performance</span>
+          <button class="range-btn active" id="chart-tab-equity" onclick="switchChartTab('equity')">Equity</button>
+          <button class="range-btn" id="chart-tab-yield" onclick="switchChartTab('yield')">Yield</button>
+          <span style="flex:1"></span>
+          <div class="chart-range-wrap" style="margin:0">
+            <button class="range-btn range-day-btn active" data-days="7" onclick="setChartRange(7,this)">7D</button>
+            <button class="range-btn range-day-btn" data-days="30" onclick="setChartRange(30,this)">30D</button>
+            <button class="range-btn range-day-btn" data-days="90" onclick="setChartRange(90,this)">90D</button>
+            <button class="range-btn range-day-btn" data-days="9999" onclick="setChartRange(9999,this)">All</button>
+          </div>
+        </div>
+        <div class="chart-container bal-chart-wrap" id="chart-wrap">
+          <canvas id="equity-chart"></canvas>
+          <canvas id="yield-chart" style="display:none"></canvas>
+        </div>
+      </div>
+
+      <!-- Pending Orders -->
+      <div class="panel panel-wide" id="pending-orders-panel" style="display:none">
+        <h2>Pending Orders <span class="badge" id="pending-orders-count">0</span></h2>
+        <div id="pending-orders-table"></div>
+      </div>
+
+      <!-- Open Positions -->
+      <div class="panel panel-wide">
+        <h2>Open Positions <span class="badge" id="positions-count">loading</span></h2>
+        <div id="positions-table">
+          <div class="skeleton-table"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+        </div>
+      </div>
+
+      <!-- Resolved History -->
+      <div class="panel panel-wide">
+        <h2>Resolved History <span class="badge" id="history-count">loading</span></h2>
+        <div id="history-table">
+          <div class="skeleton-table"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+        </div>
+      </div>
+
+      <!-- System Health + Modules (compact side-by-side) -->
+      <div class="panel-wide system-panels-row">
+        <div class="panel panel-secondary">
+          <h2>System Status <span class="badge">{{ health|length }} feeds</span></h2>
+          {% if health %}
+            {% for name, info in health.items() %}
+            <div class="health-row">
+              <span><span class="health-dot dot-{{ info.status }}"></span>{{ name }}</span>
+              <span style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">{{ info.status }}{% if info.error %} &mdash; {{ info.error[:50] }}{% endif %}</span>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty-state">No health checks registered</div>
+          {% endif %}
+        </div>
+
+        <div class="panel panel-secondary">
+          <h2>Modules <span class="badge">{{ module_counts.active }}/{{ module_counts.total }} active</span></h2>
+          {% for key, mod in modules.items() %}
+          <div class="module-row">
+            <span class="module-dot {{ 'module-active' if mod.status == 'active' else 'module-pending' }}"></span>
+            <span class="module-name">{{ mod.name }}</span>
+            <span class="module-desc">{{ mod.description }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========== OPPORTUNITIES TAB =========== -->
+  <div class="tab-content" id="tab-opportunities">
+    <div class="grid">
+      <div class="panel panel-wide">
+        <h2>Scored Candidates <span class="badge" id="opps-count">loading</span></h2>
+        <div id="opportunities-table">
+          <div class="skeleton-table"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+        </div>
+      </div>
+      <div class="panel panel-wide panel-secondary">
+        <h2 class="panel-collapse-toggle collapsed" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('collapsed')">Column Definitions <span class="badge">Scoring Factors</span></h2>
+        <div class="panel-collapsible collapsed">
+        <div class="table-wrap">
+          <table class="config-table">
+            <thead><tr><th>Column</th><th>Formula / Source</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Price</strong></td><td>Best ask</td><td class="info-text">Current ask price — cost to buy one share (pays $1 at resolution)</td></tr>
+              <tr><td><strong>Yield</strong></td><td>(1 - price) / price &times; 365 / days</td><td class="info-text">Annualized return if held to resolution</td></tr>
+              <tr><td><strong>Score</strong></td><td>Product of 5 factors</td><td class="info-text">Composite opportunity score — all factors multiplied (range 0–1). Spread Efficiency shown for reference but not in score.</td></tr>
+              <tr><td><strong>Yield Score</strong></td><td>tanh(yield / scale)</td><td class="info-text">Yield factor with diminishing returns (scale={{ bond_yield_scale }})</td></tr>
+              <tr><td><strong>Liquidity</strong></td><td>depth / (depth + scale)</td><td class="info-text">Ask-side depth sigmoid — can you get filled? (half-sat ${{ "%.0f"|format(bond_liquidity_scale) }})</td></tr>
+              <tr><td><strong>Time</strong></td><td>exp(-days / tau)</td><td class="info-text">Time to resolution — sooner is better (tau={{ bond_time_tau }}d)</td></tr>
+              <tr><td><strong>Exit Liq</strong></td><td>bid / (bid + scale)</td><td class="info-text">Bid-side depth — can you exit if wrong? (half-sat ${{ "%.0f"|format(bond_liquidity_scale) }})</td></tr>
+              <tr><td><strong>Mkt Qual</strong></td><td>vol / (vol + scale)</td><td class="info-text">Volume-based trust signal (half-sat ${{ "%.0f"|format(bond_volume_scale) }})</td></tr>
+              <tr><td><strong>Spread</strong></td><td>spread_penalty(price, spread)</td><td class="info-text">Displayed for reference; removed from composite score (Kelly handles execution risk)</td></tr>
+              <tr><td><strong>Order $</strong></td><td>Kelly-sized</td><td class="info-text">Computed order size in USD ({{ sizing_formula }})</td></tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========== WATCHLIST TAB =========== -->
+  <div class="tab-content" id="tab-watchlist">
+    <div class="grid">
+      <div class="panel panel-wide">
+        <h2>Domain Watchlist</h2>
+        <p class="info-text">
+          Monitors crypto and DeFi markets using an <strong>EWMA</strong> (exponentially weighted moving average)
+          to detect unusual price movements. <strong>Z-score</strong> measures deviation from the moving average &mdash;
+          high absolute values signal anomalies. <strong>Intensity</strong> combines z-score with volume
+          to prioritize alerts.
+        </p>
+      </div>
+      <div class="panel panel-wide">
+        <h2>Crypto/DeFi Markets <span class="badge" id="watchlist-count">loading</span></h2>
+        <div id="watchlist-table">
+          <div class="skeleton-table"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========== STRATEGY TAB =========== -->
+  <div class="tab-content" id="tab-strategy">
+    <div class="grid">
+
+      <!-- How It Works -->
+      <div class="panel panel-wide">
+        <h2>How It Works</h2>
+        <p class="info-text" style="margin-bottom:1rem">
+          <strong>Bond trading</strong> means buying near-certain Polymarket outcomes at a discount and profiting from the spread when the market resolves.
+          A market trading at $0.95 for an outcome that resolves to $1.00 yields ~5.3% on capital &mdash; annualized across short-duration markets, this creates attractive risk-adjusted returns.
+        </p>
+        <div class="formula-box" style="line-height:2.2">
+          <span class="factor-name">Scan markets</span> <span class="operator">&rarr;</span>
+          <span class="factor-name">Score candidates</span> <span class="operator">&rarr;</span>
+          <span class="factor-name">Size positions</span> <span class="operator">&rarr;</span>
+          <span class="factor-name">Execute via CLOB</span> <span class="operator">&rarr;</span>
+          <span class="factor-name">Monitor</span> <span class="operator">&rarr;</span>
+          <span class="factor-name">Collect on resolution</span>
+        </div>
+      </div>
+
+      <!-- Scoring Engine -->
+      <div class="panel panel-wide">
+        <h2>Scoring Engine <span class="badge">5 factors</span></h2>
+        <p class="info-text" style="margin-bottom:1.25rem">
+          Final score = product of all 5 factors (multiplicative &mdash; any low factor drives score toward zero).
+          Spread Efficiency is displayed for reference but removed from the composite score (Kelly sizing handles execution risk).
+        </p>
+        <div class="table-wrap">
+          <table class="config-table">
+            <thead><tr><th>Factor</th><th>Formula</th><th>Config</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Yield</strong></td>
+                <td>tanh(annualized_yield / {{ bond_yield_scale }})</td>
+                <td>scale={{ bond_yield_scale }}</td>
+                <td class="info-text">Higher yield = higher score, diminishing returns</td>
+              </tr>
+              <tr>
+                <td><strong>Liquidity</strong></td>
+                <td>depth / (depth + scale)</td>
+                <td>${{ "%.0f"|format(bond_liquidity_scale) }}</td>
+                <td class="info-text">Michaelis-Menten sigmoid on ask depth</td>
+              </tr>
+              <tr>
+                <td><strong>Time Value</strong></td>
+                <td>exp(-days / tau)</td>
+                <td>tau={{ bond_time_tau }}</td>
+                <td class="info-text">Closer to resolution = higher score</td>
+              </tr>
+              <tr>
+                <td><strong>Exit Liquidity</strong></td>
+                <td>bid / (bid + scale)</td>
+                <td>${{ "%.0f"|format(bond_liquidity_scale) }}</td>
+                <td class="info-text">Bid-side depth as exit liquidity proxy</td>
+              </tr>
+              <tr>
+                <td><strong>Market Quality</strong></td>
+                <td>vol / (vol + scale)</td>
+                <td>${{ "%.0f"|format(bond_volume_scale) }}</td>
+                <td class="info-text">Higher volume = more trustworthy</td>
+              </tr>
+              <tr style="opacity:0.5">
+                <td><strong>Spread Efficiency</strong> <span style="font-size:0.7rem;color:var(--text-muted)">(removed)</span></td>
+                <td>spread_penalty(price, spread)</td>
+                <td style="color:var(--text-muted)">&mdash;</td>
+                <td class="info-text">No longer in composite score &mdash; Kelly sizing handles execution risk via slippage adjustment</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Position Sizing -->
+      <div class="panel panel-wide">
+        <h2>Position Sizing</h2>
+        <div class="formula-box">
+          <span class="factor-name">size</span> <span class="operator">=</span>
+          <span class="factor-name">cash</span> <span class="operator">&times;</span>
+          <span class="factor-name">kelly</span> <span class="operator">&times;</span>
+          <span class="factor-name">concentration</span> <span class="operator">&times;</span>
+          <span class="factor-name">diversification</span> <span class="operator">&times;</span>
+          <span class="factor-name">&radic;(score)</span>
+        </div>
+        <div class="table-wrap">
+          <table class="config-table">
+            <thead><tr><th>Component</th><th>Formula</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Kelly</strong></td>
+                <td>Beta({{ bond_kelly_alpha }}+wins, {{ bond_kelly_beta }}+losses)</td>
+                <td class="info-text">Bayesian posterior with drawdown cap and slippage adjustment</td>
+              </tr>
+              <tr>
+                <td><strong>Concentration</strong></td>
+                <td>exp(-exposure&sup2; / 2&middot;{{ bond_conc_sigma }}&sup2;)</td>
+                <td class="info-text">Gaussian penalty as portfolio fills up</td>
+              </tr>
+              <tr>
+                <td><strong>Diversification</strong></td>
+                <td>1 / (1 + n / {{ bond_div_decay }})</td>
+                <td class="info-text">Diminishing marginal value of each new position</td>
+              </tr>
+              <tr>
+                <td><strong>Max Order</strong></td>
+                <td>{{ "%.0f"|format(bond_max_order_pct * 100) }}% of cash</td>
+                <td class="info-text">Hard cap on single order size</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Safety Mechanisms -->
+      <div class="panel panel-wide">
+        <h2>Safety Mechanisms</h2>
+        <div style="display:grid;gap:0.75rem">
+          <div class="strategy-safety-row">
+            <strong>Heartbeat dead-man's switch</strong>
+            <span class="info-text">&mdash; Exchange auto-cancels all orders if heartbeat missed ({{ heartbeat_timeout }}s timeout, sent every {{ heartbeat_interval }}s)</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Auto-exit</strong>
+            <span class="info-text">&mdash; Positions with MTM severity > {{ "%.1f"|format(bond_auto_exit_severity) }}x gain trigger limit sell at best bid</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Order reconciliation</strong>
+            <span class="info-text">&mdash; DB vs exchange state checked every {{ bond_reconcile_cycles }} cycles</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Stale order cleanup</strong>
+            <span class="info-text">&mdash; GTC orders unfilled for > {{ bond_order_timeout }}h auto-cancelled</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Stop loss</strong>
+            <span class="info-text">&mdash; Exit position if adverse move exceeds {{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Scan interval</strong>
+            <span class="info-text">&mdash; Every {{ bond_scan_interval }}s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configuration -->
+      <div class="panel panel-wide">
+        <h2>Configuration <span class="badge">live values</span></h2>
+        <div class="table-wrap">
+          <table class="config-table">
+            <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>Enabled</td><td>{{ bond_enabled }}</td></tr>
+              <tr><td>Scan Interval</td><td>{{ bond_scan_interval }}s</td></tr>
+              <tr><td>Liquidity Scale</td><td>${{ "%.0f"|format(bond_liquidity_scale) }}</td></tr>
+              <tr><td>Time Tau</td><td>{{ bond_time_tau }} days</td></tr>
+              <tr><td>Volume Scale</td><td>${{ "%.0f"|format(bond_volume_scale) }}</td></tr>
+              <tr><td>Yield Scale</td><td>{{ bond_yield_scale }}</td></tr>
+              <tr><td>Kelly Prior</td><td>Beta({{ bond_kelly_alpha }}, {{ bond_kelly_beta }})</td></tr>
+              <tr><td>Execution Degradation</td><td>{{ "%.0f"|format(bond_exec_degradation * 100) }}%</td></tr>
+              <tr><td>Concentration Sigma</td><td>{{ bond_conc_sigma }}</td></tr>
+              <tr><td>Diversification Decay</td><td>{{ bond_div_decay }}</td></tr>
+              <tr><td>Cooldown Tau</td><td>{{ bond_cooldown_tau }}s</td></tr>
+              <tr><td>Max Order</td><td>{{ "%.0f"|format(bond_max_order_pct * 100) }}%</td></tr>
+              <tr><td>Auto-Exit Severity</td><td>{{ "%.1f"|format(bond_auto_exit_severity) }}x gain</td></tr>
+              <tr><td>Auto-Exit Tight</td><td>{{ "%.1f"|format(bond_auto_exit_severity_tight) }}x gain</td></tr>
+              <tr><td>Resolution Lag</td><td>{{ bond_resolution_lag_days }}d</td></tr>
+              <tr><td>Event Cap</td><td>{{ "%.0f"|format(bond_max_event_pct * 100) }}%</td></tr>
+              <tr><td>Taker Threshold</td><td>score {{ bond_taker_score_threshold }} / days {{ bond_taker_days_threshold }}</td></tr>
+              <tr><td>Daily Limits</td><td>{{ bond_max_daily_orders }} orders / {{ "%.0f"|format(bond_max_daily_capital_pct * 100) }}% capital</td></tr>
+              <tr><td>Adaptive Pricing</td><td>{{ bond_adaptive_pricing }} / {{ bond_price_improve_secs }}s</td></tr>
+              <tr><td>Halt Drawdown</td><td>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}% / min ${{ bond_halt_min_equity }}</td></tr>
+              <tr><td>Order Timeout</td><td>{{ bond_order_timeout }}h</td></tr>
+              <tr><td>Stop Loss</td><td>{{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</td></tr>
+              <tr><td>Entry Price Range</td><td>${{ bond_min_entry_price }} &ndash; ${{ bond_max_entry_price }}</td></tr>
+              <tr><td>Min Volume</td><td>${{ "{:,.0f}".format(bond_min_volume) }}</td></tr>
+              <tr><td>Min Liquidity</td><td>${{ "{:,.0f}".format(bond_min_liquidity) }}</td></tr>
+              <tr><td>Min Score</td><td>{{ bond_min_score }}</td></tr>
+              <tr><td>Averaging</td><td>{{ "Enabled (max " ~ bond_max_position_adds ~ " adds)" if bond_allow_averaging else "Disabled" }}</td></tr>
+              <tr><td>Balance Haircut</td><td>{{ "%.0f"|format(balance_haircut_factor * 100) }}%</td></tr>
+              <tr><td>Domain Watch</td><td>{{ domain_watch_enabled }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    <span>{{ uptime }}</span> &middot;
+    <span id="footer-rendered">Last rendered {{ rendered_at }}</span> &middot;
+    <a href="https://nandytech.net" target="_blank" rel="noopener noreferrer">Nandy Universe</a>
+  </footer>
+
+  <div class="confirm-overlay" id="generic-confirm-overlay" role="dialog" aria-modal="true">
+    <div class="confirm-modal">
+      <h3 id="generic-confirm-title"></h3>
+      <p id="generic-confirm-msg"></p>
+      <div class="btn-row">
+        <button class="btn-cancel" id="generic-confirm-cancel">Cancel</button>
+        <button id="generic-confirm-ok"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay" id="bot-confirm-overlay">
+    <div class="confirm-modal">
+      <h3 id="bot-confirm-title"></h3>
+      <p id="bot-confirm-msg"></p>
+      <div class="btn-row">
+        <button class="btn-cancel" id="bot-confirm-cancel">Cancel</button>
+        <button id="bot-confirm-ok"></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.DASHBOARD_CONFIG = {
+      walletAddress: {{ wallet_address | tojson }},
+      fetchTimeoutMs: {{ fetch_timeout_ms }},
+      equityPollMs: {{ equity_poll_ms }},
+      kpiPollMs: {{ kpi_poll_ms }},
+      positionsPollMs: {{ positions_poll_ms }},
+      ordersPollMs: {{ orders_poll_ms }},
+      historyPollMs: {{ history_poll_ms }},
+      oppsPollMs: {{ opps_poll_ms }},
+      watchlistPollMs: {{ watchlist_poll_ms }},
+      tradingStatusPollMs: {{ trading_status_poll_ms }},
+      minBuyableUsd: {{ min_buyable_usd }},
+      drawdownWarnPct: {{ drawdown_warn_pct }},
+      haltDrawdownPct: {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}
+    };
+  </script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

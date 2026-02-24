@@ -2905,8 +2905,8 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "Invalid 'days' parameter"}, status_code=400)
         try:
             rows = list(reversed(await aquery(
-                "SELECT ts, equity, cash, invested, annualized_yield FROM bond_equity WHERE ts >= current_timestamp - INTERVAL ? DAY ORDER BY ts DESC LIMIT ?",
-                [days, int(EQUITY_CURVE_MAX_ROWS)])))
+                f"SELECT ts, equity, cash, invested, annualized_yield FROM bond_equity WHERE ts >= current_timestamp - INTERVAL '{int(days)} days' ORDER BY ts DESC LIMIT ?",
+                [int(EQUITY_CURVE_MAX_ROWS)])))
             data = [{
                 "ts": r[0].strftime("%m/%d %H:%M") if hasattr(r[0], "strftime") else str(r[0]),
                 "equity": round(r[1] or 0, 2),

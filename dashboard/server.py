@@ -393,6 +393,38 @@ _DASHBOARD_HTML = """\
     .kpi-secondary-row .stat-card:hover { transform: none; border-color: var(--border); }
     .kpi-secondary-row .stat-card-scan .value { font-size: 0.85rem; font-family: var(--mono); color: var(--text-muted); line-height: 1.4; }
 
+    /* -- Drawdown gauge -- */
+    .drawdown-gauge { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .drawdown-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; position: relative; }
+    .drawdown-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.3s ease; min-width: 1px; }
+    .drawdown-fill.dd-ok { background: var(--green); }
+    .drawdown-fill.dd-warn { background: var(--yellow); }
+    .drawdown-fill.dd-danger { background: var(--red); }
+    .drawdown-label { font-size: 0.65rem; color: var(--text-muted); font-family: var(--mono); white-space: nowrap; }
+
+    /* -- Position age badge -- */
+    .age-badge { font-size: 0.75rem; font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
+    .age-badge.age-fresh { color: var(--green); }
+    .age-badge.age-mature { color: var(--yellow); }
+    .age-badge.age-stale { color: var(--red); }
+
+    /* -- Pending orders accent -- */
+    #pending-orders-panel.has-orders { border-color: var(--yellow-25); border-top: 2px solid var(--yellow); box-shadow: 0 0 12px rgba(var(--yellow-rgb), 0.06); }
+    #pending-orders-panel.has-orders h2 { border-left-color: var(--yellow); }
+
+    /* -- Compact system panels -- */
+    .system-panels-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 768px) { .system-panels-row { grid-template-columns: 1fr; } }
+
+    /* -- Sortable table headers in portfolio -- */
+    .portfolio-sortable th[data-sort] { cursor: pointer; user-select: none; }
+    .portfolio-sortable th[data-sort]:hover { color: var(--accent); }
+
+    /* -- Inline P&L bar -- */
+    .pnl-bar { display: inline-block; height: 3px; border-radius: 2px; vertical-align: middle; margin-left: 4px; min-width: 2px; max-width: 40px; }
+    .pnl-bar.pnl-bar-pos { background: var(--green); }
+    .pnl-bar.pnl-bar-neg { background: var(--red); }
+
     /* -- Misc -- */
     .empty-state { color: var(--text-muted); text-align: center; padding: 3rem 1.5rem; font-size: 0.875rem; border: 1px dashed var(--border); border-radius: 8px; background: rgba(255,255,255,0.01); }
     .empty-state::before {
@@ -891,9 +923,13 @@ _DASHBOARD_HTML = """\
             <div class="value" id="kpi-daily-orders">{{ overview.daily_orders_filled }}/{{ overview.daily_orders_max }}</div>
             <div class="label">Orders Today</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card" id="kpi-drawdown-card">
             <div class="value" id="kpi-drawdown">{{ "%.1f"|format(overview.drawdown_pct) }}%</div>
             <div class="label">Drawdown</div>
+            <div class="drawdown-gauge">
+              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > 15 else 'dd-warn' if overview.drawdown_pct > 5 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct * 100 / 30, 100] | min }}%"></div></div>
+              <span class="drawdown-label" id="kpi-drawdown-limit">/ {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}%</span>
+            </div>
           </div>
           <div class="stat-card stat-card-scan">
             <div class="value" id="kpi-scan-stats">&mdash;</div>
@@ -945,30 +981,32 @@ _DASHBOARD_HTML = """\
         </div>
       </div>
 
-      <!-- System Health + Modules -->
-      <div class="panel panel-secondary">
-        <h2>System Status <span class="badge">{{ health|length }} feeds</span></h2>
-        {% if health %}
-          {% for name, info in health.items() %}
-          <div class="health-row">
-            <span><span class="health-dot dot-{{ info.status }}"></span>{{ name }}</span>
-            <span style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">{{ info.status }}{% if info.error %} &mdash; {{ info.error[:50] }}{% endif %}</span>
+      <!-- System Health + Modules (compact side-by-side) -->
+      <div class="panel-wide system-panels-row">
+        <div class="panel panel-secondary">
+          <h2>System Status <span class="badge">{{ health|length }} feeds</span></h2>
+          {% if health %}
+            {% for name, info in health.items() %}
+            <div class="health-row">
+              <span><span class="health-dot dot-{{ info.status }}"></span>{{ name }}</span>
+              <span style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">{{ info.status }}{% if info.error %} &mdash; {{ info.error[:50] }}{% endif %}</span>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty-state">No health checks registered</div>
+          {% endif %}
+        </div>
+
+        <div class="panel panel-secondary">
+          <h2>Modules <span class="badge">{{ module_counts.active }}/{{ module_counts.total }} active</span></h2>
+          {% for key, mod in modules.items() %}
+          <div class="module-row">
+            <span class="module-dot {{ 'module-active' if mod.status == 'active' else 'module-pending' }}"></span>
+            <span class="module-name">{{ mod.name }}</span>
+            <span class="module-desc">{{ mod.description }}</span>
           </div>
           {% endfor %}
-        {% else %}
-          <div class="empty-state">No health checks registered</div>
-        {% endif %}
-      </div>
-
-      <div class="panel panel-secondary">
-        <h2>Modules <span class="badge">{{ module_counts.active }}/{{ module_counts.total }} active</span></h2>
-        {% for key, mod in modules.items() %}
-        <div class="module-row">
-          <span class="module-dot {{ 'module-active' if mod.status == 'active' else 'module-pending' }}"></span>
-          <span class="module-name">{{ mod.name }}</span>
-          <span class="module-desc">{{ mod.description }}</span>
         </div>
-        {% endfor %}
       </div>
     </div>
   </div>
@@ -1587,7 +1625,8 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       recEl.textContent=(d.wins||0)+'W / '+(d.losses||0)+'L';
       recEl.className='value '+((d.wins||0)>(d.losses||0)?'pnl-positive':(d.losses||0)>(d.wins||0)?'pnl-negative':'');
       var dailyEl=document.getElementById('kpi-daily-orders');if(dailyEl){var filled=d.daily_orders_filled||0;dailyEl.textContent=filled+'/'+(d.daily_orders_max||0);}
-      var ddEl=document.getElementById('kpi-drawdown');if(ddEl){ddEl.textContent=(d.drawdown_pct||0).toFixed(1)+'%';ddEl.className='value '+((d.drawdown_pct||0)>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}?'pnl-negative':(d.drawdown_pct||0)>{{ drawdown_warn_pct }}?'pnl-warn':'');}
+      var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}?'pnl-negative':ddPct>{{ drawdown_warn_pct }}?'pnl-warn':'');}
+      var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct*100/30)+'%';ddBar.className='drawdown-fill '+(ddPct>15?'dd-danger':ddPct>5?'dd-warn':'dd-ok');}
       var ss=d.scan_stats||{};
       var scanEl=document.getElementById('kpi-scan-stats');
       if(scanEl&&ss.scanned_at){scanEl.textContent=(ss.candidates_found||0)+' candidates / '+(ss.markets_scanned||0)+' mkts \u2014 '+relTime(ss.scanned_at);}
@@ -1599,34 +1638,79 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   }
   setInterval(refreshKPIs,{{ kpi_poll_ms }});
 
-  // -- Open Positions --
+  // -- Open Positions (sortable with age) --
+  var _posSortKey='unrealized_pnl';
+  var _posSortAsc=true;
+  var _posData=[];
+  function posAge(openedAt){
+    if(!openedAt)return {text:'\u2014',cls:'',hours:0};
+    var d=new Date(openedAt);if(isNaN(d.getTime()))return {text:'\u2014',cls:'',hours:0};
+    var h=Math.max(0,(Date.now()-d.getTime())/3600000);
+    var cls=h<24?'age-fresh':h<72?'age-mature':'age-stale';
+    if(h<1)return {text:Math.round(h*60)+'m',cls:cls,hours:h};
+    if(h<24)return {text:Math.round(h)+'h',cls:cls,hours:h};
+    return {text:Math.floor(h/24)+'d '+Math.round(h%24)+'h',cls:cls,hours:h};
+  }
+  function pnlBar(v,maxV){
+    if(!v||!maxV)return '';
+    var w=Math.min(40,Math.max(2,Math.round(Math.abs(v)/maxV*40)));
+    return '<span class="pnl-bar '+(v>=0?'pnl-bar-pos':'pnl-bar-neg')+'" style="width:'+w+'px"></span>';
+  }
+  function renderPositions(rows){
+    var el=document.getElementById('positions-table');
+    document.getElementById('positions-count').textContent=rows.length;
+    if(!rows.length){el.innerHTML='<div class="empty-state">No open positions \u2014 scanner will find opportunities.</div>';return;}
+    var maxPnl=Math.max.apply(null,rows.map(function(r){return Math.abs(N(r.unrealized_pnl))||1;}));
+    var cols=[{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Now',key:'current_price',num:true},{label:'Yield',key:'annualized_yield',num:true},{label:'Cost',key:'cost_basis',num:true},{label:'Shares',key:'shares',num:true},{label:'P&L',key:'unrealized_pnl',num:true},{label:'Age',key:'_age_hours',num:true},{label:'Expires',key:'end_date'},{label:'',key:null}];
+    var html='<div class="table-wrap"><table class="portfolio-sortable" id="pos-tbl"><thead><tr>';
+    cols.forEach(function(c){
+      var arrow='';
+      if(c.key){
+        if(_posSortKey===c.key){arrow=' <span class="sort-arrow active">'+(_posSortAsc?'\u25B2':'\u25BC')+'</span>';}
+        else{arrow=' <span class="sort-arrow">\u25BC</span>';}
+      }
+      html+='<th'+(c.num?' class="num"':'')+(c.key?' data-sort="'+c.key+'"':'')+'>'+c.label+arrow+'</th>';
+    });
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var qText=htmlEscape(truncate(r.question,60));
+      var qFull=htmlEscape(r.question||'');
+      html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
+      html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
+      html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
+      html+='<td class="num">'+N(r.current_price).toFixed(3)+'</td>';
+      html+='<td class="num accent-gold">'+(N(r.annualized_yield)*100).toFixed(1)+'%</td>';
+      html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
+      html+='<td class="num">'+N(r.shares).toFixed(1)+'</td>';
+      var upnl=N(r.unrealized_pnl);
+      html+='<td class="num '+pnlClass(upnl)+'"><span class="bal-val">'+(upnl>=0?'+$':'-$')+Number(Math.abs(upnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'+pnlBar(upnl,maxPnl)+'</td>';
+      var age=posAge(r.opened_at);
+      html+='<td class="num"><span class="age-badge '+age.cls+'">'+age.text+'</span></td>';
+      html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
+      var posStatus=r.status||'open';
+      html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="exitPosition(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',this)">Exit</button>')+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+    el.innerHTML=html;attachScrollFade(el);
+    var thead=document.querySelector('#pos-tbl thead');
+    if(thead)thead.onclick=function(e){
+      var th=e.target.closest('th');var key=th?th.dataset.sort:null;
+      if(key){
+        if(_posSortKey===key){_posSortAsc=!_posSortAsc;}else{_posSortKey=key;_posSortAsc=(key==='question'||key==='outcome');}
+        _posData.forEach(function(r){r._age_hours=posAge(r.opened_at).hours;});
+        sortData(_posData,_posSortKey,_posSortAsc);
+        renderPositions(_posData);
+      }
+    };
+  }
   function loadPositions(){
     if(_tabHidden)return;
     fetchWithTimeout(apiUrl('/api/bonds/positions')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
-      var el=document.getElementById('positions-table');
-      if(data.error){el.innerHTML=errorHtml(data.error,'loadPositions');document.getElementById('positions-count').textContent='error';return;}
-      var rows=Array.isArray(data)?data:[];
-      document.getElementById('positions-count').textContent=rows.length;
-      if(!rows.length){el.innerHTML='<div class="empty-state">No open positions \u2014 scanner will find opportunities.</div>';return;}
-      var html='<div class="table-wrap"><table><thead><tr><th>Market</th><th>Side</th><th class="num">Entry</th><th class="num">Now</th><th class="num">Yield</th><th class="num">Cost</th><th class="num">Shares</th><th class="num">P&L</th><th>Expires</th><th></th></tr></thead><tbody>';
-      rows.forEach(function(r){
-        var qText=htmlEscape(truncate(r.question,60));
-        var qFull=htmlEscape(r.question||'');
-        html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
-        html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
-        html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
-        html+='<td class="num">'+N(r.current_price).toFixed(3)+'</td>';
-        html+='<td class="num accent-gold">'+(N(r.annualized_yield)*100).toFixed(1)+'%</td>';
-        html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
-        html+='<td class="num">'+N(r.shares).toFixed(1)+'</td>';
-        var upnl=N(r.unrealized_pnl);
-        html+='<td class="num '+pnlClass(upnl)+'"><span class="bal-val">'+(upnl>=0?'+$':'-$')+Number(Math.abs(upnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span></td>';
-        html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
-        var posStatus=r.status||'open';
-        html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" onclick="exitPosition(\\''+htmlEscape(r.market_id)+'\\',\\''+htmlEscape(r.token_id)+'\\',this)">Exit</button>')+'</td></tr>';
-      });
-      html+='</tbody></table></div>';
-      el.innerHTML=html;attachScrollFade(el);
+      if(data.error){document.getElementById('positions-table').innerHTML=errorHtml(data.error,'loadPositions');document.getElementById('positions-count').textContent='error';return;}
+      _posData=Array.isArray(data)?data:[];
+      _posData.forEach(function(r){r._age_hours=posAge(r.opened_at).hours;});
+      sortData(_posData,_posSortKey,_posSortAsc);
+      renderPositions(_posData);
     }).catch(function(){
       document.getElementById('positions-table').innerHTML=errorHtml('Failed to load positions','loadPositions');
       document.getElementById('positions-count').textContent='error';
@@ -1644,8 +1728,8 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
       if(!Array.isArray(data)){panel.style.display='none';return;}
       var rows=data.filter(function(r){return r.status==='pending'||r.status==='open';});
       document.getElementById('pending-orders-count').textContent=rows.length;
-      if(!rows.length){panel.style.display='none';return;}
-      panel.style.display='';
+      if(!rows.length){panel.style.display='none';panel.classList.remove('has-orders');return;}
+      panel.style.display='';panel.classList.add('has-orders');
       var html='<div class="table-wrap"><table><thead><tr><th>Market</th><th>Side</th><th class="num">Price</th><th class="num">Size</th><th class="num">Shares</th><th>Age</th><th></th></tr></thead><tbody>';
       rows.forEach(function(r){
         var qText=htmlEscape(truncate(r.question||'',60));
@@ -1671,34 +1755,62 @@ document.addEventListener('visibilitychange',function(){_tabHidden=document.hidd
   loadPendingOrders();
   setInterval(loadPendingOrders,{{ orders_poll_ms }});
 
-  // -- Resolved History --
+  // -- Resolved History (sortable) --
+  var _histSortKey='closed_at';
+  var _histSortAsc=false;
+  var _histData=[];
+  function renderHistory(rows){
+    var el=document.getElementById('history-table');
+    document.getElementById('history-count').textContent=rows.length;
+    if(!rows.length){el.innerHTML='<div class="empty-state">No resolved positions yet.</div>';return;}
+    var maxPnl=Math.max.apply(null,rows.map(function(r){return Math.abs(N(r.realized_pnl))||1;}));
+    var cols=[{label:'Market',key:'question'},{label:'Side',key:'outcome'},{label:'Entry',key:'entry_price',num:true},{label:'Size',key:'cost_basis',num:true},{label:'P&L',key:'realized_pnl',num:true},{label:'Result',key:'status'},{label:'Closed',key:'closed_at'}];
+    var html='<div class="table-wrap"><table class="portfolio-sortable" id="hist-tbl"><thead><tr>';
+    cols.forEach(function(c){
+      var arrow='';
+      if(c.key){
+        if(_histSortKey===c.key){arrow=' <span class="sort-arrow active">'+(_histSortAsc?'\u25B2':'\u25BC')+'</span>';}
+        else{arrow=' <span class="sort-arrow">\u25BC</span>';}
+      }
+      html+='<th'+(c.num?' class="num"':'')+(c.key?' data-sort="'+c.key+'"':'')+'>'+c.label+arrow+'</th>';
+    });
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var isWin=r.status==='resolved_win';
+      var isExit=r.status==='exited';
+      var rpnl=N(r.realized_pnl);
+      var qText=htmlEscape(truncate(r.question,60));
+      var qFull=htmlEscape(r.question||'');
+      html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
+      html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
+      html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
+      html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
+      html+='<td class="num '+pnlClass(rpnl)+'">'+(rpnl>=0?'+$':'-$')+Number(Math.abs(rpnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+pnlBar(rpnl,maxPnl)+'</td>';
+      var badgeClass=isWin?'badge-ok':isExit?'badge-warn':'badge-error';
+      var badgeText=isWin?'WIN':isExit?'EXITED':'LOSS';
+      html+='<td><span class="badge '+badgeClass+'">'+badgeText+'</span></td>';
+      html+='<td class="td-muted">'+relTime(r.closed_at)+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+    el.innerHTML=html;attachScrollFade(el);
+    var thead=document.querySelector('#hist-tbl thead');
+    if(thead)thead.onclick=function(e){
+      var th=e.target.closest('th');var key=th?th.dataset.sort:null;
+      if(key){
+        if(_histSortKey===key){_histSortAsc=!_histSortAsc;}else{_histSortKey=key;_histSortAsc=(key==='question'||key==='outcome');}
+        sortData(_histData,_histSortKey,_histSortAsc);
+        renderHistory(_histData);
+      }
+    };
+  }
   function loadHistory(){
     if(_tabHidden)return;
     fetchWithTimeout(apiUrl('/api/bonds/history')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       var el=document.getElementById('history-table');
       if(data.error){el.innerHTML=errorHtml(data.error,'loadHistory');document.getElementById('history-count').textContent='error';return;}
-      var rows=Array.isArray(data)?data:[];
-      document.getElementById('history-count').textContent=rows.length;
-      if(!rows.length){el.innerHTML='<div class="empty-state">No resolved positions yet.</div>';return;}
-      var html='<div class="table-wrap"><table><thead><tr><th>Market</th><th>Side</th><th class="num">Entry</th><th class="num">Size</th><th class="num">P&L</th><th>Result</th><th>Closed</th></tr></thead><tbody>';
-      rows.forEach(function(r){
-        var isWin=r.status==='resolved_win';
-        var isExit=r.status==='exited';
-        var rpnl=N(r.realized_pnl);
-        var qText=htmlEscape(truncate(r.question,60));
-        var qFull=htmlEscape(r.question||'');
-        html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
-        html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
-        html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
-        html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
-        html+='<td class="num '+pnlClass(rpnl)+'">'+(rpnl>=0?'+$':'-$')+Number(Math.abs(rpnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</td>';
-        var badgeClass=isWin?'badge-ok':isExit?'badge-warn':'badge-error';
-        var badgeText=isWin?'WIN':isExit?'EXITED':'LOSS';
-        html+='<td><span class="badge '+badgeClass+'">'+badgeText+'</span></td>';
-        html+='<td class="td-muted">'+relTime(r.closed_at)+'</td></tr>';
-      });
-      html+='</tbody></table></div>';
-      el.innerHTML=html;attachScrollFade(el);
+      _histData=Array.isArray(data)?data:[];
+      sortData(_histData,_histSortKey,_histSortAsc);
+      renderHistory(_histData);
     }).catch(function(){
       document.getElementById('history-table').innerHTML=errorHtml('Failed to load history','loadHistory');
       document.getElementById('history-count').textContent='error';

@@ -900,7 +900,7 @@ _DASHBOARD_HTML = """\
   </header>
 
   {% if wallet_address %}
-  <div class="wallet-modal-overlay" id="wallet-modal">
+  <div class="wallet-modal-overlay" id="wallet-modal" role="dialog" aria-modal="true" aria-label="Wallet details">
     <div class="wallet-modal">
       <h3>Fund Wallet</h3>
       {% if wallet_qr %}<div class="qr-wrap"><img src="{{ wallet_qr }}" alt="Wallet QR" width="160" height="160"></div>{% endif %}
@@ -1325,7 +1325,7 @@ _DASHBOARD_HTML = """\
     <a href="https://nandytech.net" target="_blank" rel="noopener noreferrer">Nandy Universe</a>
   </footer>
 
-  <div class="confirm-overlay" id="generic-confirm-overlay">
+  <div class="confirm-overlay" id="generic-confirm-overlay" role="dialog" aria-modal="true">
     <div class="confirm-modal">
       <h3 id="generic-confirm-title"></h3>
       <p id="generic-confirm-msg"></p>
@@ -1429,9 +1429,11 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   var walletModal=document.getElementById('wallet-modal');
   var walletModalClose=document.getElementById('wallet-modal-close');
   if(qrBtn&&walletModal&&walletModalClose){
+    function closeWallet(){walletModal.classList.remove('active');}
     qrBtn.addEventListener('click',function(){walletModal.classList.add('active');});
-    walletModalClose.addEventListener('click',function(){walletModal.classList.remove('active');});
-    walletModal.addEventListener('click',function(e){if(e.target===walletModal)walletModal.classList.remove('active');});
+    walletModalClose.addEventListener('click',closeWallet);
+    walletModal.addEventListener('click',function(e){if(e.target===walletModal)closeWallet();});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'&&walletModal.classList.contains('active'))closeWallet();});
   }
   var fullAddr=document.getElementById('wallet-full-addr');
   if(fullAddr){
@@ -1461,7 +1463,9 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     document.getElementById('generic-confirm-msg').textContent=msg;
     okBtn.textContent=okText;okBtn.className=okClass||'btn-confirm-on';
     ov.classList.add('active');
-    function cleanup(){ov.classList.remove('active');okBtn.onclick=null;canBtn.onclick=null;ov.onclick=null;}
+    function cleanup(){ov.classList.remove('active');okBtn.onclick=null;canBtn.onclick=null;ov.onclick=null;document.removeEventListener('keydown',escHandler);}
+    function escHandler(e){if(e.key==='Escape')cleanup();}
+    document.addEventListener('keydown',escHandler);
     canBtn.onclick=cleanup;
     ov.onclick=function(e){if(e.target===ov)cleanup();};
     okBtn.onclick=function(){cleanup();callback();};
@@ -1851,7 +1855,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
         html+='<td class="num">'+N(r.price).toFixed(3)+'</td>';
         html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.size))+'</span></td>';
         html+='<td class="num">'+N(r.shares).toFixed(1)+'</td>';
-        html+='<td class="td-muted">'+relTime(r.created_at)+'</td>';
+        var oAge=posAge(r.created_at);html+='<td class="td-muted">'+oAge.text+'</td>';
         html+='<td><button class="btn-action btn-cancel-order" onclick="cancelOrder('+(Number(r.id)||0)+',\\''+htmlEscape(r.clob_order_id||'')+'\\',this)">Cancel</button></td></tr>';
       });
       html+='</tbody></table></div>';
@@ -1897,7 +1901,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       html+='<td class="'+sideClass(r.outcome)+'">'+htmlEscape(r.outcome)+'</td>';
       html+='<td class="num">'+N(r.entry_price).toFixed(3)+'</td>';
       html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
-      html+='<td class="num '+pnlClass(rpnl)+'">'+(rpnl>=0?'+$':'-$')+Number(Math.abs(rpnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+pnlBar(rpnl,maxPnl)+'</td>';
+      html+='<td class="num '+pnlClass(rpnl)+'"><span class="bal-val">'+(rpnl>=0?'+$':'-$')+Number(Math.abs(rpnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'+pnlBar(rpnl,maxPnl)+'</td>';
       var badgeClass=isWin?'badge-ok':isExit?'badge-warn':'badge-error';
       var badgeText=isWin?'WIN':isExit?'EXITED':'LOSS';
       html+='<td><span class="badge '+badgeClass+'">'+badgeText+'</span></td>';
@@ -2267,7 +2271,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     showConfirm(title,msg,isBuy?'Buy':'Exit',isBuy?'btn-confirm-on':'btn-confirm-off',function(){
       _pendingTrades.add(key);
       if(btn){btn.classList.add('loading');btn.textContent=isBuy?'Placing...':'Exiting...';}
-      fetch(apiUrl('/api/watchlist/trade'), {
+      fetchWithTimeout(apiUrl('/api/watchlist/trade'), {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({market_id:marketId, action:action, side:side})
       }).then(function(r){
@@ -2316,7 +2320,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   function exitPosition(marketId,tokenId,btn){
     showConfirm('Exit Position?','A sell order will be placed at best bid.','Exit','btn-confirm-off',function(){
       if(btn)btn.disabled=true;
-      fetch(apiUrl('/api/bonds/positions/close'),{
+      fetchWithTimeout(apiUrl('/api/bonds/positions/close'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({market_id:marketId,token_id:tokenId})
       }).then(function(r){return r.json()}).then(function(d){
@@ -2330,7 +2334,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   function cancelOrder(orderId,clobOrderId,btn){
     showConfirm('Cancel Order?','This will cancel the pending order on the exchange.','Cancel Order','btn-confirm-off',function(){
       if(btn)btn.disabled=true;
-      fetch(apiUrl('/api/bonds/orders/cancel'),{
+      fetchWithTimeout(apiUrl('/api/bonds/orders/cancel'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({order_id:orderId,clob_order_id:clobOrderId})
       }).then(function(r){return r.json()}).then(function(d){
@@ -2344,7 +2348,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   function buyOpportunity(marketId,tokenId,outcome,btn){
     showConfirm('Place Buy Order?','Place a buy order for '+outcome+'?','Buy','btn-confirm-on',function(){
       if(btn)btn.disabled=true;
-      fetch(apiUrl('/api/bonds/opportunities/buy'),{
+      fetchWithTimeout(apiUrl('/api/bonds/opportunities/buy'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({market_id:marketId,token_id:tokenId,outcome:outcome})
       }).then(function(r){return r.json()}).then(function(d){
@@ -2422,6 +2426,7 @@ function attachScrollFade(root){
       tw._sf=1;
       var update=function(){tw.classList.toggle('scrolled',tw.scrollLeft<tw.scrollWidth-tw.clientWidth-2);};
       tw.addEventListener('scroll',update);
+      if(window.ResizeObserver){new ResizeObserver(update).observe(tw);}
       update();
     }
   });

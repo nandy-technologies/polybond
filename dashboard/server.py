@@ -967,10 +967,6 @@ _DASHBOARD_HTML = """\
         </div>
         <div class="kpi-summary-row" id="kpi-summary-row">
           <div class="stat-card">
-            <div class="value" id="kpi-exposure-pct">&mdash;</div>
-            <div class="label">Exposure</div>
-          </div>
-          <div class="stat-card">
             <div class="value" id="kpi-avg-yield">&mdash;</div>
             <div class="label">Avg Yield</div>
           </div>
@@ -1007,7 +1003,7 @@ _DASHBOARD_HTML = """\
             <div class="value" id="kpi-drawdown">{{ "%.1f"|format(overview.drawdown_pct) }}%</div>
             <div class="label">Drawdown</div>
             <div class="drawdown-gauge">
-              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > 15 else 'dd-warn' if overview.drawdown_pct > 5 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct * 100 / 30, 100] | min }}%"></div></div>
+              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > bond_halt_drawdown_pct * 75 else 'dd-warn' if overview.drawdown_pct > bond_halt_drawdown_pct * 25 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct / (bond_halt_drawdown_pct * 100) * 100, 100] | min }}%"></div></div>
               <span class="drawdown-label" id="kpi-drawdown-limit">/ {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}%</span>
             </div>
           </div>
@@ -1713,7 +1709,8 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       recEl.className='value '+((d.wins||0)>(d.losses||0)?'pnl-positive':(d.losses||0)>(d.wins||0)?'pnl-negative':'');
       var dailyEl=document.getElementById('kpi-daily-orders');if(dailyEl){var filled=d.daily_orders_filled||0;dailyEl.textContent=filled+'/'+(d.daily_orders_max||0);}
       var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}?'pnl-negative':ddPct>{{ drawdown_warn_pct }}?'pnl-warn':'');}
-      var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct*100/30)+'%';ddBar.className='drawdown-fill '+(ddPct>15?'dd-danger':ddPct>5?'dd-warn':'dd-ok');}
+      var _haltPct={{ "%.0f"|format(bond_halt_drawdown_pct * 100) }};
+      var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct/_haltPct*100)+'%';ddBar.className='drawdown-fill '+(ddPct>_haltPct*0.75?'dd-danger':ddPct>_haltPct*0.25?'dd-warn':'dd-ok');}
       // Capital utilization (equity = cash + invested + unrealized P&L)
       var cash_total=N(d.cash);var inv_total=N(d.invested);var upnl_total=N(d.unrealized_pnl);
       var eq_total=cash_total+inv_total+upnl_total;
@@ -1721,8 +1718,6 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
       var capBar=document.getElementById('kpi-cap-util-bar');
       if(capBar){capBar.style.width=Math.min(100,capPct)+'%';capBar.style.background=capPct>80?'var(--red)':capPct>50?'var(--yellow)':'var(--accent)';}
-      var expEl=document.getElementById('kpi-exposure-pct');if(expEl)expEl.textContent=(eq_total>0?(inv_total/eq_total*100):0).toFixed(0)+'%';
-
       // Scan stats with freshness
       var ss=d.scan_stats||{};
       var scanEl=document.getElementById('kpi-scan-stats');
@@ -1841,12 +1836,14 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       var ayEl=document.getElementById('kpi-avg-yield');
       var adEl=document.getElementById('kpi-avg-days');
       if(_posData.length>0){
-        var totalYield=0,totalDays=0,countDays=0;
+        var weightedYield=0,totalCost=0,totalDays=0,countDays=0;
         _posData.forEach(function(r){
-          totalYield+=N(r.annualized_yield);
+          var cb=N(r.cost_basis);
+          weightedYield+=N(r.annualized_yield)*cb;
+          totalCost+=cb;
           if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
         });
-        if(ayEl)ayEl.textContent=(totalYield/_posData.length*100).toFixed(1)+'%';
+        if(ayEl)ayEl.textContent=(totalCost>0?(weightedYield/totalCost*100):0).toFixed(1)+'%';
         if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
       } else {
         if(ayEl)ayEl.textContent='\u2014';
@@ -1985,7 +1982,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     html+='<td class="num factor-cell">'+bar(r.yield_score)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.liquidity_score)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.time_value)+'</td>';
-    html+='<td class="num factor-cell">'+bar(r.resolution_confidence)+'</td>';
+    html+='<td class="num factor-cell">'+bar(r.exit_liquidity)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.market_quality)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.spread_efficiency)+'</td>';
     html+='<td class="num"><span class="bal-val">'+(r.computed_size?fmtMoney(r.computed_size):'\u2014')+'</span></td>';
@@ -2040,7 +2037,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
       {label:'Yield',key:'annualized_yield',num:true},
       {label:'Score',key:'opportunity_score',num:true},{label:'Yield Score',key:'yield_score',num:true,factor:true,title:'tanh(yield / scale)'},
       {label:'Liquidity',key:'liquidity_score',num:true,factor:true,title:'tanh(depth / scale)'},{label:'Time',key:'time_value',num:true,factor:true,title:'exp(-days / tau)'},
-      {label:'Exit Liq',key:'resolution_confidence',num:true,factor:true,title:'Exit liquidity (bid depth)'},{label:'Mkt Qual',key:'market_quality',num:true,factor:true,title:'Volume & spread quality'},
+      {label:'Exit Liq',key:'exit_liquidity',num:true,factor:true,title:'Exit liquidity (bid depth)'},{label:'Mkt Qual',key:'market_quality',num:true,factor:true,title:'Volume & spread quality'},
       {label:'Spread',key:'spread_efficiency',num:true,factor:true,title:'1 - spread/price'},{label:'Size',key:'computed_size',num:true}
     ];
     var html='<div class="table-wrap"><table id="opps-tbl"><thead><tr>';
@@ -2079,7 +2076,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
         html+='<td class="num factor-cell">'+bar(best.yield_score)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.liquidity_score)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.time_value)+'</td>';
-        html+='<td class="num factor-cell">'+bar(best.resolution_confidence)+'</td>';
+        html+='<td class="num factor-cell">'+bar(best.exit_liquidity)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.market_quality)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.spread_efficiency)+'</td>';
         html+='<td class="num">'+(best.computed_size?fmtMoney(best.computed_size):'\u2014')+'</td>';
@@ -2896,10 +2893,10 @@ def create_app() -> FastAPI:
                         opp_score=c["opportunity_score"],
                         synthetic_depth=c.get("synthetic_depth", False),
                     )
-                    result.append({
-                        **{k: round(v, 8 if k == 'opportunity_score' else 4) if isinstance(v, float) else v for k, v in c.items()},
-                        "computed_size": round(computed_size, 2),
-                    })
+                    row = {k: round(v, 8 if k == 'opportunity_score' else 4) if isinstance(v, float) else v for k, v in c.items()}
+                    row["exit_liquidity"] = row.get("resolution_confidence", 0)  # alias legacy field
+                    row["computed_size"] = round(computed_size, 2)
+                    result.append(row)
                 _opps_cache["data"] = result
                 _opps_cache["ts"] = time.monotonic()
                 return JSONResponse(result)

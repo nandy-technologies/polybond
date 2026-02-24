@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time as _time
+from collections import OrderedDict
 
 import config
 from utils.logger import get_logger
@@ -18,8 +19,9 @@ _last_send_time: float = 0.0
 _MIN_SEND_INTERVAL: float = config.ALERT_MIN_INTERVAL
 
 # Fix #23: Alert deduplication - suppress duplicate alerts within 5 minutes
-_alert_cache: dict[str, float] = {}  # {message_hash: last_sent_timestamp}
+_alert_cache: OrderedDict[str, float] = OrderedDict()  # {message_hash: last_sent_timestamp}
 _ALERT_DEDUP_WINDOW: float = config.ALERT_DEDUP_WINDOW
+_ALERT_CACHE_MAX_SIZE: int = config.ALERT_CACHE_MAX_SIZE
 
 
 async def send_imsg(message: str, skip_dedup: bool = False) -> bool:
@@ -42,17 +44,19 @@ async def send_imsg(message: str, skip_dedup: bool = False) -> bool:
         import hashlib
         msg_hash = hashlib.sha256(message.encode()).hexdigest()[:16]
         now = _time.monotonic()
-        
-        # Clean old entries from cache (>10min old)
-        _alert_cache = {k: v for k, v in _alert_cache.items() if now - v < _ALERT_DEDUP_WINDOW * 2}
-        
+
         last_sent = _alert_cache.get(msg_hash)
         if last_sent and (now - last_sent) < _ALERT_DEDUP_WINDOW:
-            log.debug("alert_deduplicated", message=message[:80], 
+            log.debug("alert_deduplicated", message=message[:80],
                      last_sent_secs_ago=round(now - last_sent, 1))
             return False  # Suppress duplicate
-        
+
+        # Insert/update and move to end (most recent)
         _alert_cache[msg_hash] = now
+        _alert_cache.move_to_end(msg_hash)
+        # Evict oldest entries if cache exceeds max size
+        while len(_alert_cache) > _ALERT_CACHE_MAX_SIZE:
+            _alert_cache.popitem(last=False)
 
     cmd = ["imsg", "send", "--handle", IMSG_HANDLE, "--text", message]
 

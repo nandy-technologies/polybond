@@ -39,6 +39,10 @@ log = get_logger("bond_scanner")
 _bond_wins: int = 0
 _bond_losses: int = 0
 
+# Rolling-window Kelly stats (cached per scan cycle)
+_rolling_wins: int | None = None
+_rolling_losses: int | None = None
+
 # Track peak equity for circuit breaker
 _peak_equity: float = 0.0
 
@@ -94,6 +98,34 @@ async def reload_bond_stats() -> None:
         log.info("bond_stats_reloaded", wins=wins, losses=losses)
     except Exception as exc:
         log.warning("bond_stats_load_failed", error=str(exc))
+
+
+async def _refresh_rolling_kelly_stats() -> None:
+    """Refresh rolling-window win/loss counts for Kelly sizing.
+
+    Uses the most recent BOND_KELLY_ROLLING_WINDOW trades.
+    Falls back to all-time counts if fewer than 10 trades in the window.
+    """
+    global _rolling_wins, _rolling_losses
+    try:
+        rows = await aquery(
+            "SELECT status FROM bond_positions WHERE status IN ('resolved_win', 'resolved_loss') "
+            "ORDER BY closed_at DESC LIMIT ?",
+            [config.BOND_KELLY_ROLLING_WINDOW],
+        )
+        if rows and len(rows) >= 10:
+            wins = sum(1 for (s,) in rows if s == "resolved_win")
+            losses = sum(1 for (s,) in rows if s == "resolved_loss")
+            _rolling_wins = wins
+            _rolling_losses = losses
+        else:
+            # Fewer than 10 trades in window — fall back to all-time
+            _rolling_wins = None
+            _rolling_losses = None
+    except Exception as exc:
+        log.debug("rolling_kelly_query_failed", error=str(exc))
+        _rolling_wins = None
+        _rolling_losses = None
 
 
 async def load_bond_stats() -> None:
@@ -290,6 +322,9 @@ async def scan_bond_candidates() -> list[dict]:
     """Scan all active markets for bond candidates and return scored list."""
     _scan_start = time.monotonic()
 
+    # Refresh rolling Kelly stats once per scan cycle
+    await _refresh_rolling_kelly_stats()
+
     # Query active markets with end dates
     rows = await aquery(
         """
@@ -310,23 +345,29 @@ async def scan_bond_candidates() -> list[dict]:
     ws_cache_hits = 0  # Track actual WS cache hits
     max_rest_fetches = config.BOND_MAX_REST_FETCHES
 
+    # First pass: collect token_ids needing REST fallback
+    _rest_fallback_needed: list[tuple[str, str, float, str, str, float, str, str, str, int]] = []
+    # (token_id, market_id, volume, question, outcome, days_remaining, ...)
+    # We store the full row context needed to resume processing after parallel fetch
+
+    # Build a mapping of token_id -> row context for tokens needing REST fallback
+    _rest_tokens: list[str] = []  # token_ids to fetch via REST
+    _rest_context: dict[str, list] = {}  # token_id -> list of (market row context)
+
+    # Also build ob_map for tokens that already have WS data
+    _ob_map: dict[str, dict] = {}  # token_id -> orderbook
+
     for market_id, question, volume, end_date, meta_str, condition_id, slug, event_slug, event_title in rows:
         try:
-            # Parse end_date
             end_dt = ensure_utc(end_date)
-
             days_remaining = max(0, (end_dt - now).total_seconds() / 86400)
             if days_remaining <= 0:
                 continue
-            # Resolution lag — actual resolution typically lags trading close by 1-3 days
             effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
-
-            # Get token IDs
             token_ids = _parse_token_ids(meta_str)
             if len(token_ids) < 2:
                 continue
 
-            # Check both sides of the market
             for idx, token_id in enumerate(token_ids[:2]):
                 outcome = "Yes" if idx == 0 else "No"
 
@@ -339,37 +380,65 @@ async def scan_bond_candidates() -> list[dict]:
                     if current_ob:
                         current_ts = current_ob.get("ts", 0)
                         if current_ts <= cached.ws_cache_ts:
-                            # No new WS data — score likely still zero
                             global _negative_cache_hits
                             _negative_cache_hits += 1
                             continue
-                    # WS data is newer OR missing — remove from cache and re-evaluate
                     del _negative_cache[cache_key]
 
-                # Optimization: Stale WS cache price pre-filter
-                # If we have ANY cached price (even >30s old), use it to skip
-                # obvious out-of-range markets before expensive REST call
+                # Stale WS cache price pre-filter
                 from feeds.clob_ws import get_orderbook
                 stale_ob = get_orderbook(token_id, max_age=0)
                 if stale_ob is not None:
                     stale_price = stale_ob.get("best_ask", 0)
                     if stale_price > 0:
                         if stale_price < config.BOND_MIN_ENTRY_PRICE * config.BOND_PREFILTER_DISCOUNT:
-                            continue  # Well below bond range
+                            continue
                         if stale_price > config.BOND_MAX_ENTRY_PRICE:
-                            continue  # Market resolved/spiked
+                            continue
 
-                # Optimization #4: WebSocket Orderbook Priority Over REST
-                # Always prioritize WS data when available and fresh (<30s old)
-                # Only fall back to REST if WS data is stale (>30s) or missing
-                # This reduces API calls and improves latency for price-sensitive operations
-                ob = get_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)  # Tight freshness requirement for WS
+                # Prioritize fresh WS data
+                ob = get_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)
                 if ob is not None:
                     ws_cache_hits += 1
-                if ob is None and rest_fetches < max_rest_fetches and (volume or 0) >= config.BOND_REST_FALLBACK_MIN_VOLUME:
-                    # Fix #22: Parallel REST fetch moved to _get_orderbook_with_rest_fallback
-                    ob = await _get_orderbook_with_rest_fallback(token_id)
-                    rest_fetches += 1
+                    _ob_map[token_id] = ob
+                elif (volume or 0) >= config.BOND_REST_FALLBACK_MIN_VOLUME and token_id not in _rest_context:
+                    # Mark for REST fallback (deduplicate by token_id)
+                    _rest_tokens.append(token_id)
+                    _rest_context[token_id] = []
+        except Exception as exc:
+            log.debug("scan_prepass_error", market_id=market_id, error=str(exc))
+
+    # Parallel REST orderbook fetch (capped at max_rest_fetches)
+    _rest_tokens = _rest_tokens[:max_rest_fetches]
+    if _rest_tokens:
+        rest_results = await asyncio.gather(
+            *[_get_orderbook_with_rest_fallback(tid) for tid in _rest_tokens],
+            return_exceptions=True,
+        )
+        for tid, result in zip(_rest_tokens, rest_results):
+            if isinstance(result, Exception):
+                log.debug("rest_fetch_error", token_id=tid, error=str(result))
+            elif result is not None:
+                _ob_map[tid] = result
+        rest_fetches = len(_rest_tokens)
+
+    # Second pass: score candidates using cached + REST orderbooks
+    for market_id, question, volume, end_date, meta_str, condition_id, slug, event_slug, event_title in rows:
+        try:
+            end_dt = ensure_utc(end_date)
+            days_remaining = max(0, (end_dt - now).total_seconds() / 86400)
+            if days_remaining <= 0:
+                continue
+            effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
+            token_ids = _parse_token_ids(meta_str)
+            if len(token_ids) < 2:
+                continue
+
+            for idx, token_id in enumerate(token_ids[:2]):
+                outcome = "Yes" if idx == 0 else "No"
+
+                # Skip tokens not in ob_map (no WS or REST data)
+                ob = _ob_map.get(token_id)
                 if ob is None:
                     continue
 
@@ -822,8 +891,8 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             total_invested=portfolio["total_invested"],
             n_positions=portfolio["n_positions"],
             days_remaining=candidate.get("effective_days", candidate["days_remaining"]),
-            wins=_bond_wins,
-            losses=_bond_losses,
+            wins=_rolling_wins if _rolling_wins is not None else _bond_wins,
+            losses=_rolling_losses if _rolling_losses is not None else _bond_losses,
             fee_rate_bps=fee_bps,
             opp_score=candidate["opportunity_score"],
             synthetic_depth=candidate.get("synthetic_depth", False),

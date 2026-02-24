@@ -199,6 +199,7 @@ BOND_MIN_ORDER_ROUND_UP_FACTOR: float = float(os.getenv("BOND_MIN_ORDER_ROUND_UP
 BOND_DEFAULT_FEE_BPS: int = int(os.getenv("BOND_DEFAULT_FEE_BPS", "20"))
 BOND_SCORING_MIN_FLOOR: float = float(os.getenv("BOND_SCORING_MIN_FLOOR", "0.05"))
 BOND_TAKER_OB_MAX_AGE: float = float(os.getenv("BOND_TAKER_OB_MAX_AGE", "5"))
+BOND_KELLY_ROLLING_WINDOW: int = int(os.getenv("BOND_KELLY_ROLLING_WINDOW", "50"))
 
 # -- Order manager parameters ---------------------------------------------------
 BOND_STOP_LOSS_PCT: float = float(os.getenv("BOND_STOP_LOSS_PCT", "0.20"))
@@ -221,6 +222,7 @@ MARKET_CACHE_TTL: int = int(os.getenv("MARKET_CACHE_TTL", "3600"))
 ALERT_MIN_INTERVAL: float = float(os.getenv("ALERT_MIN_INTERVAL", "5.0"))
 ALERT_DEDUP_WINDOW: float = float(os.getenv("ALERT_DEDUP_WINDOW", "300.0"))
 ALERT_SEND_TIMEOUT: float = float(os.getenv("ALERT_SEND_TIMEOUT", "10.0"))
+ALERT_CACHE_MAX_SIZE: int = int(os.getenv("ALERT_CACHE_MAX_SIZE", "1000"))
 
 # -- Backup ---------------------------------------------------------------------
 BACKUP_MAX_COUNT: int = int(os.getenv("BACKUP_MAX_COUNT", "12"))

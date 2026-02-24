@@ -397,23 +397,14 @@ async def run(
                             # Store by asset_id (token_id) so callers can look up by token
                             ob_key = ob.get("asset_id") or ob["market_id"]
 
-                            # Preserve depth from last full snapshot for price_change events
-                            # (price_change events have asks=[{price, size:0}])
-                            prev = _orderbooks.get(ob_key)
-                            if prev is not None:
-                                new_asks = ob.get("asks", [])
-                                if (len(new_asks) == 1 and new_asks[0].get("size", 0) == 0
-                                        and len(prev.get("asks", [])) > 1):
-                                    ob["asks"] = prev["asks"]
-                                new_bids = ob.get("bids", [])
-                                if (len(new_bids) == 1 and len(prev.get("bids", [])) > 1):
-                                    ob["bids"] = prev["bids"]
-
-                            _orderbooks[ob_key] = ob
-                            _orderbooks.move_to_end(ob_key)
-                            # Cap orderbook cache — evict oldest (front of OrderedDict)
-                            while len(_orderbooks) > _MAX_SUBSCRIPTIONS:
-                                _orderbooks.popitem(last=False)
+                            # Depth-preservation and cache storage already handled
+                            # in _parse_orderbook() for price_change events.
+                            # For full snapshots, store directly.
+                            if not event.get("price_changes"):
+                                _orderbooks[ob_key] = ob
+                                _orderbooks.move_to_end(ob_key)
+                                while len(_orderbooks) > _MAX_SUBSCRIPTIONS:
+                                    _orderbooks.popitem(last=False)
                             if on_orderbook is not None:
                                 try:
                                     result = on_orderbook(ob)

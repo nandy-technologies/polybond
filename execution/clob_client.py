@@ -611,7 +611,7 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
         account = w3.eth.account.from_key(config.POLYMARKET_PRIVATE_KEY)
         wallet = account.address
 
-        condition_bytes = bytes.fromhex(condition_id.replace("0x", ""))
+        condition_bytes = bytes.fromhex(condition_id.replace("0x", "")).rjust(32, b'\x00')
         parent_collection = b"\x00" * 32
 
         # indexSets: [1, 2] covers both Yes (0b01) and No (0b10) outcome slots

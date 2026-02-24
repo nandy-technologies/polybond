@@ -6,6 +6,7 @@ var _tabHidden=document.hidden||false;
 var _activeDashTab='portfolio';
 document.addEventListener('visibilitychange',function(){_tabHidden=document.hidden;});
 function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
+var _initialLoadDone=false;
 
 (function(){
   // -- Tab switching (lazy-load) --
@@ -203,7 +204,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   }
   window.switchChartTab=switchChartTab;
   function loadEquityChart(){
-    if(!isTabActive("portfolio"))return;
+    if(_initialLoadDone&&!isTabActive("portfolio"))return;
     if(_chartLoading)return;
     _chartLoading=true;
     if(_chartAbort){_chartAbort.abort();}
@@ -453,7 +454,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     };
   }
   function loadPositions(){
-    if(!isTabActive("portfolio"))return;
+    if(_initialLoadDone&&!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/positions')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('positions-table').innerHTML=errorHtml(data.error,'loadPositions');document.getElementById('positions-count').textContent='error';return;}
       _posData=Array.isArray(data)?data:[];
@@ -487,7 +488,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
 
   // -- Pending Orders --
   function loadPendingOrders(){
-    if(!isTabActive("portfolio"))return;
+    if(_initialLoadDone&&!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/orders')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       var panel=document.getElementById('pending-orders-panel');
       var el=document.getElementById('pending-orders-table');
@@ -570,7 +571,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
     };
   }
   function loadHistory(){
-    if(!isTabActive("portfolio"))return;
+    if(_initialLoadDone&&!isTabActive("portfolio"))return;
     fetchWithTimeout(apiUrl('/api/bonds/history')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       var el=document.getElementById('history-table');
       if(data.error){el.innerHTML=errorHtml(data.error,'loadHistory');document.getElementById('history-count').textContent='error';return;}
@@ -584,6 +585,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   }
   loadHistory();
   setInterval(loadHistory,window.DASHBOARD_CONFIG.historyPollMs);
+  _initialLoadDone=true;
 
   // -- Opportunities (sortable) --
   var _oppsData=[];
@@ -806,7 +808,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
 
   var _oppsLoading=false;
   function loadOpportunities(){
-    if(!isTabActive("opportunities"))return;
+    if(_initialLoadDone&&!isTabActive("opportunities"))return;
     if(_oppsLoading)return;
     _oppsLoading=true;
     fetchWithTimeout(apiUrl('/api/bonds/opportunities')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
@@ -952,7 +954,7 @@ function isTabActive(tabName){return !_tabHidden && _activeDashTab===tabName;}
   })();
 
   function loadWatchlist(){
-    if(!isTabActive("watchlist"))return;
+    if(_initialLoadDone&&!isTabActive("watchlist"))return;
     fetchWithTimeout(apiUrl('/api/watchlist/crypto')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('watchlist-table').innerHTML=errorHtml(data.error,'loadWatchlist');document.getElementById('watchlist-count').textContent='error';return;}
       _watchData=Array.isArray(data)?data:[];

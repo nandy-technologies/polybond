@@ -324,6 +324,14 @@ async def scan_bond_candidates() -> list[dict]:
     # Refresh rolling Kelly stats once per scan cycle
     await _refresh_rolling_kelly_stats()
 
+    # Compute portfolio-proportional scales for scoring
+    _portfolio_for_scales = await get_bond_portfolio_state()
+    _equity = max(_portfolio_for_scales.get("equity", 0), 1.0)
+    _volume_scale = min(config.BOND_VOLUME_SCALE, max(1000, _equity * 50))
+    _liquidity_scale = min(config.BOND_LIQUIDITY_SCALE, max(100, _equity * 5))
+    log.info("scoring_scales", equity=f"{_equity:.2f}",
+             volume_scale=f"{_volume_scale:.0f}", liquidity_scale=f"{_liquidity_scale:.0f}")
+
     # Query active markets with end dates
     rows = await aquery(
         """
@@ -473,7 +481,7 @@ async def scan_bond_candidates() -> list[dict]:
                 raw_yield = (1.0 - price) / price if price > 0 else 0
                 ann_yield = raw_yield * (365.0 / max(days_remaining, 0.01))
 
-                # Compute opportunity score
+                # Compute opportunity score with portfolio-proportional scales
                 opp_score = opportunity_score(
                     ann_yield=ann_yield,
                     ask_depth=ask_depth,
@@ -482,6 +490,8 @@ async def scan_bond_candidates() -> list[dict]:
                     volume=volume or 0,
                     spread=spread,
                     price=price,
+                    volume_scale=_volume_scale,
+                    liquidity_scale=_liquidity_scale,
                 )
 
                 # Record in negative cache if score is near-zero
@@ -518,12 +528,12 @@ async def scan_bond_candidates() -> list[dict]:
                     "end_date": end_dt.isoformat(),
                     "volume": volume or 0,
                     "opportunity_score": opp_score,
-                    # Individual factor breakdown
+                    # Individual factor breakdown (with portfolio-proportional scales)
                     "yield_score": yield_score(ann_yield),
-                    "liquidity_score": liquidity_score(ask_depth),
+                    "liquidity_score": liquidity_score(ask_depth, scale=_liquidity_scale),
                     "time_value": time_value(days_remaining),
-                    "resolution_confidence": resolution_confidence(bid_depth),
-                    "market_quality": market_quality(volume or 0),
+                    "resolution_confidence": resolution_confidence(bid_depth, scale=_liquidity_scale),
+                    "market_quality": market_quality(volume or 0, scale=_volume_scale),
                     "spread_efficiency": spread_efficiency(spread, price),
                 })
 
@@ -811,30 +821,12 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
     # Phase 1: Collect orders to place
     batch_entries: list[dict] = []  # Each: {candidate, order_price, size_usd, neg_risk, tick_size_str, shares}
 
-    # Dynamic min score: compute from portfolio state
-    # Minimum viable order = POLYMARKET_MIN_SHARES * typical bond price (~0.95)
-    # size = cash * kelly_est * conc * div * sqrt(score)
-    # Solve for score: score = (min_order / (cash * kelly_est * conc * div))^2
-    _min_order_usd = config.POLYMARKET_MIN_SHARES * 0.95 * config.BOND_MIN_ORDER_ROUND_UP_FACTOR
-    _kelly_est = 0.15  # Conservative estimate of typical Kelly fraction after adjustments
-    _exposure_ratio = total_invested / max(equity, 1.0)
-    _conc_est = math.exp(-(_exposure_ratio ** 2) / (2.0 * config.BOND_CONC_SIGMA ** 2))
-    _n_pos = portfolio["n_positions"]
-    _div_est = 1.0 / (1.0 + _n_pos / config.BOND_DIV_DECAY)
-    _sizing_capacity = cash * _kelly_est * _conc_est * _div_est
-    if _sizing_capacity > 0:
-        _dynamic_min_score = (_min_order_usd / _sizing_capacity) ** 2
-    else:
-        _dynamic_min_score = 1.0  # No capacity = no trades
-    # Floor: never go below a tiny threshold to avoid scoring noise
-    _dynamic_min_score = max(_dynamic_min_score, 1e-4)
-    log.info("dynamic_min_score", min_score=f"{_dynamic_min_score:.6f}",
-             sizing_capacity=f"{_sizing_capacity:.2f}", min_order=f"{_min_order_usd:.2f}")
-
-    # Pre-filter eligible candidates
+    # Pre-filter eligible candidates (static noise floor only — sizing gates at execution time)
+    _scoring_rejected = 0
     eligible = []
     for candidate in candidates:
-        if candidate["opportunity_score"] < _dynamic_min_score:
+        if candidate["opportunity_score"] < config.BOND_MIN_SCORE:
+            _scoring_rejected += 1
             continue
         market_id = candidate["market_id"]
         token_id = candidate["token_id"]
@@ -849,6 +841,10 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         if market_id in executed_markets:
             continue
         eligible.append(candidate)
+
+    log.info("scoring_funnel", total_candidates=len(candidates),
+             passed_scoring=len(eligible), rejected_scoring=_scoring_rejected,
+             min_score=config.BOND_MIN_SCORE)
 
     if not eligible:
         return 0
@@ -876,6 +872,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
     fee_map = dict(zip(token_ids_to_fetch, fee_results))
     tick_map = dict(zip(token_ids_to_fetch, tick_results))
 
+    _sizing_rejected = 0
     for candidate in eligible:
         market_id = candidate["market_id"]
         token_id = candidate["token_id"]
@@ -985,6 +982,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             if size_usd >= min_usd * config.BOND_MIN_ORDER_ROUND_UP_FACTOR:
                 size_usd = min_usd
             else:
+                _sizing_rejected += 1
                 continue
 
         # Check neg_risk and category from pre-fetched market meta
@@ -1044,6 +1042,10 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         executed_markets.add(market_id)
         category_exposure[candidate_category] = category_exposure.get(candidate_category, 0.0) + size_usd
         event_exposure[candidate_event] = event_exposure.get(candidate_event, 0.0) + size_usd
+
+    if _sizing_rejected > 0:
+        log.info("sizing_funnel", eligible=len(eligible), sized_ok=len(batch_entries),
+                 rejected_sizing=_sizing_rejected)
 
     if not batch_entries:
         return 0

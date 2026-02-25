@@ -702,21 +702,47 @@ async def get_fee_rate(token_id: str) -> int:
 
 
 def _normalize_order_result(result) -> dict:
-    """Normalize SDK order result to a consistent dict format."""
+    """Normalize SDK order result to a consistent dict format.
+    
+    IMPORTANT: 'price' is the average execution price when available
+    (from associate_trades), falling back to the order's limit price.
+    This ensures position entry_price reflects actual fill cost, not the limit.
+    """
     if isinstance(result, dict):
+        limit_price = float(result.get("price", 0))
+        filled_size = float(result.get("size_matched", result.get("filled_size", 0)))
+        
+        # Compute average fill price from associate_trades if available
+        avg_fill_price = limit_price  # default to limit price
+        trades = result.get("associate_trades", result.get("trades", []))
+        if trades and isinstance(trades, list):
+            total_cost = 0.0
+            total_shares = 0.0
+            for t in trades:
+                if isinstance(t, dict):
+                    t_price = float(t.get("price", 0))
+                    t_size = float(t.get("size", 0))
+                    if t_price > 0 and t_size > 0:
+                        total_cost += t_price * t_size
+                        total_shares += t_size
+            if total_shares > 0:
+                avg_fill_price = total_cost / total_shares
+        
         return {
             "id": result.get("orderID", result.get("id", result.get("order_id", ""))),
             "status": result.get("status", result.get("orderStatus", "unknown")),
-            "price": float(result.get("price", 0)),
+            "price": avg_fill_price,
+            "limit_price": limit_price,
             "size": float(result.get("size", result.get("original_size", 0))),
-            "filled": float(result.get("size_matched", result.get("filled_size", 0))),
+            "filled": filled_size,
             "raw": result,
         }
-    # Handle object responses
+    # Handle object responses (no trades available)
     return {
         "id": getattr(result, "orderID", getattr(result, "id", "")),
         "status": getattr(result, "status", "unknown"),
         "price": float(getattr(result, "price", 0)),
+        "limit_price": float(getattr(result, "price", 0)),
         "size": float(getattr(result, "size", 0)),
         "filled": float(getattr(result, "size_matched", 0)),
         "raw": str(result),

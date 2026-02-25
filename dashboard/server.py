@@ -122,6 +122,7 @@ async def _get_overview() -> dict:
         portfolio_kelly = alpha / (alpha + beta_)
 
         return {
+            # wallet_usdc = exchange (CLOB) balance; wallet_usdc_onchain = on-chain Polygon USDC.e balance
             "wallet_usdc": round(wallet_usdc, 2) if wallet_usdc is not None else None,
             "cash": round(state["cash"], 2),
             "invested": round(state["total_invested"], 2),
@@ -425,6 +426,9 @@ def create_app() -> FastAPI:
                 del _trade_locks[k]
         if key not in _trade_locks:
             _trade_locks[key] = (asyncio.Lock(), now)
+        else:
+            # Update timestamp to prevent eviction while lock is in use
+            _trade_locks[key] = (_trade_locks[key][0], now)
         return _trade_locks[key][0]
 
     @app.get("/api/bonds/opportunities")
@@ -491,10 +495,13 @@ def create_app() -> FastAPI:
     async def api_bonds_equity_curve(request: Request):
         try:
             days = int(request.query_params.get("days", "7"))
-            days = max(1, min(days, 9999))
+            if not (1 <= days <= 9999):
+                days = 365
         except (ValueError, TypeError):
             return JSONResponse({"error": "Invalid 'days' parameter"}, status_code=400)
         try:
+            # Safe: days is guaranteed to be an int in [1, 9999] by validation above.
+            # PostgreSQL doesn't support parameterized INTERVAL, so we use f-string with int().
             rows = list(reversed(await aquery(
                 f"SELECT ts, equity, cash, invested, annualized_yield FROM bond_equity WHERE ts >= current_timestamp - INTERVAL '{int(days)} days' ORDER BY ts DESC LIMIT ?",
                 [int(EQUITY_CURVE_MAX_ROWS)])))

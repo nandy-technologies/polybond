@@ -76,7 +76,7 @@
       <div class="header-toggle-sep"></div>
       <div class="bot-toggle-wrap-header">
         <span class="bot-toggle-label">Trading</span>
-        <button class="bot-toggle-btn" id="bot-toggle-btn" title="Toggle trading"><span class="sr-only">Toggle trading</span></button>
+        <button class="bot-toggle-btn" id="bot-toggle-btn" title="Toggle trading" aria-pressed="false"><span class="sr-only">Toggle trading</span></button>
         <span class="bot-toggle-status" id="bot-toggle-status"></span>
       </div>
     </div>
@@ -98,15 +98,15 @@
 
   <div class="copy-toast" id="copy-toast">Copied to clipboard</div>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="portfolio">Portfolio</button>
-    <button class="tab" data-tab="opportunities">Opportunities</button>
-    <button class="tab" data-tab="watchlist">Watchlist</button>
-    <button class="tab" data-tab="strategy">Strategy</button>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="portfolio" role="tab" aria-selected="true">Portfolio</button>
+    <button class="tab" data-tab="opportunities" role="tab" aria-selected="false">Opportunities</button>
+    <button class="tab" data-tab="watchlist" role="tab" aria-selected="false">Watchlist</button>
+    <button class="tab" data-tab="strategy" role="tab" aria-selected="false">Strategy</button>
   </nav>
 
   <!-- =========== PORTFOLIO TAB =========== -->
-  <div class="tab-content active" id="tab-portfolio">
+  <div class="tab-content active" id="tab-portfolio" role="tabpanel">
     <div class="grid">
       <!-- KPI Row -->
       <div class="panel panel-wide panel-hero">
@@ -244,7 +244,7 @@
   </div>
 
   <!-- =========== OPPORTUNITIES TAB =========== -->
-  <div class="tab-content" id="tab-opportunities">
+  <div class="tab-content" id="tab-opportunities" role="tabpanel">
     <div class="grid">
       <div class="panel panel-wide">
         <h2>Scored Candidates <span class="badge" id="opps-count">loading</span></h2>
@@ -278,7 +278,7 @@
   </div>
 
   <!-- =========== WATCHLIST TAB =========== -->
-  <div class="tab-content" id="tab-watchlist">
+  <div class="tab-content" id="tab-watchlist" role="tabpanel">
     <div class="grid">
       <div class="panel panel-wide">
         <h2>Crypto/DeFi Markets <span class="badge" id="watchlist-count">loading</span></h2>
@@ -301,7 +301,7 @@
   </div>
 
   <!-- =========== STRATEGY TAB =========== -->
-  <div class="tab-content" id="tab-strategy">
+  <div class="tab-content" id="tab-strategy" role="tabpanel">
     <div class="grid">
 
       <!-- How It Works -->
@@ -535,7 +535,7 @@
       tradingStatusPollMs: {{ trading_status_poll_ms }},
       minBuyableUsd: {{ min_buyable_usd }},
       drawdownWarnPct: {{ drawdown_warn_pct }},
-      haltDrawdownPct: {{ (bond_halt_drawdown_pct * 100)|round|int }}
+      haltDrawdownPct: {{ (bond_halt_drawdown_pct * 100)|round(1) }}
     };
   </script>
   <script src="/static/dashboard.js"></script>

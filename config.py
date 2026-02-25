@@ -95,8 +95,8 @@ BOND_YIELD_SCALE: float = float(os.getenv("BOND_YIELD_SCALE", "2.0"))
 BOND_MIN_SCORE: float = float(os.getenv("BOND_MIN_SCORE", "0.004"))  # Optimization: widened funnel from 0.01 to capture 5-10 concurrent positions
 BOND_MIN_ENTRY_PRICE: float = float(os.getenv("BOND_MIN_ENTRY_PRICE", "0.80"))
 
-BOND_KELLY_PRIOR_ALPHA: float = float(os.getenv("BOND_KELLY_PRIOR_ALPHA", "100.0"))
-BOND_KELLY_PRIOR_BETA: float = float(os.getenv("BOND_KELLY_PRIOR_BETA", "2.0"))
+BOND_KELLY_PRIOR_ALPHA: float = float(os.getenv("BOND_KELLY_PRIOR_ALPHA", "20.0"))  # Weaker prior for new bot; tightens as real data comes in
+BOND_KELLY_PRIOR_BETA: float = float(os.getenv("BOND_KELLY_PRIOR_BETA", "1.0"))
 BOND_EXECUTION_DEGRADATION: float = float(os.getenv("BOND_EXECUTION_DEGRADATION", "0.02"))
 
 BOND_CONC_SIGMA: float = float(os.getenv("BOND_CONC_SIGMA", "0.50"))

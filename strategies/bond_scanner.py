@@ -819,12 +819,19 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         )
         for cat, cost_basis in (cat_rows or []):
             category_exposure[cat or "Unknown"] = category_exposure.get(cat or "Unknown", 0.0) + cost_basis
+        # Include pending/open buy orders
+        pending_cat_rows = await aquery(
+            "SELECT COALESCE(m.category, 'Unknown'), bo.size FROM bond_orders bo JOIN markets m ON bo.market_id = m.id WHERE bo.status IN ('pending', 'open') AND bo.side = 'buy'"
+        )
+        for cat, size in (pending_cat_rows or []):
+            category_exposure[cat or "Unknown"] = category_exposure.get(cat or "Unknown", 0.0) + size
     except Exception:
         pass
 
     # Event-level exposure tracking (markets in same event are maximally correlated)
     event_exposure: dict[str, float] = {}
     try:
+        # Count both open positions AND pending/open buy orders as event exposure
         evt_rows = await aquery(
             "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), bp.cost_basis "
             "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
@@ -832,6 +839,14 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         )
         for evt, cost_basis in (evt_rows or []):
             event_exposure[evt or "unknown"] = event_exposure.get(evt or "unknown", 0.0) + cost_basis
+        # Include pending/open buy orders (not yet positions but capital is committed)
+        pending_evt_rows = await aquery(
+            "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), bo.size "
+            "FROM bond_orders bo JOIN markets m ON bo.market_id = m.id "
+            "WHERE bo.status IN ('pending', 'open') AND bo.side = 'buy'"
+        )
+        for evt, size in (pending_evt_rows or []):
+            event_exposure[evt or "unknown"] = event_exposure.get(evt or "unknown", 0.0) + size
     except Exception:
         pass
 

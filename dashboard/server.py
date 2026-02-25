@@ -273,7 +273,7 @@ def create_app() -> FastAPI:
                 bond_max_order_pct=config.BOND_MAX_ORDER_PCT,
                 bond_auto_exit_severity=config.BOND_AUTO_EXIT_SEVERITY,
                 bond_auto_exit_severity_tight=config.BOND_AUTO_EXIT_SEVERITY_TIGHT,
-                bond_resolution_lag_days=config.BOND_RESOLUTION_LAG_DAYS,
+                # bond_resolution_lag_days removed
                 bond_max_event_pct=config.BOND_MAX_EVENT_PCT,
                 bond_taker_score_threshold=config.BOND_TAKER_SCORE_THRESHOLD,
                 bond_taker_days_threshold=config.BOND_TAKER_DAYS_THRESHOLD,

@@ -361,10 +361,7 @@ async def scan_bond_candidates() -> list[dict]:
     for market_id, question, volume, end_date, meta_str, condition_id, slug, event_slug, event_title in rows:
         try:
             end_dt = ensure_utc(end_date)
-            days_remaining = max(0, (end_dt - now).total_seconds() / 86400)
-            if days_remaining <= 0:
-                continue
-            effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
+            days_remaining = max(0.01, (end_dt - now).total_seconds() / 86400)
             token_ids = _parse_token_ids(meta_str)
             if len(token_ids) < 2:
                 continue
@@ -424,10 +421,7 @@ async def scan_bond_candidates() -> list[dict]:
     for market_id, question, volume, end_date, meta_str, condition_id, slug, event_slug, event_title in rows:
         try:
             end_dt = ensure_utc(end_date)
-            days_remaining = max(0, (end_dt - now).total_seconds() / 86400)
-            if days_remaining <= 0:
-                continue
-            effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
+            days_remaining = max(0.01, (end_dt - now).total_seconds() / 86400)
             token_ids = _parse_token_ids(meta_str)
             if len(token_ids) < 2:
                 continue
@@ -475,9 +469,9 @@ async def scan_bond_candidates() -> list[dict]:
                     if level.get("price", 0) > 0 and level.get("size", 0) > 0
                 )
 
-                # Raw yield and annualized (use effective_days to account for resolution lag)
+                # Raw yield and annualized
                 raw_yield = (1.0 - price) / price if price > 0 else 0
-                ann_yield = raw_yield * (365.0 / max(effective_days, 0.01))
+                ann_yield = raw_yield * (365.0 / max(days_remaining, 0.01))
 
                 # Compute opportunity score
                 opp_score = opportunity_score(
@@ -520,7 +514,7 @@ async def scan_bond_candidates() -> list[dict]:
                     "raw_yield": raw_yield,
                     "annualized_yield": ann_yield,
                     "days_remaining": days_remaining,
-                    "effective_days": effective_days,
+                    "effective_days": days_remaining,
                     "end_date": end_dt.isoformat(),
                     "volume": volume or 0,
                     "opportunity_score": opp_score,
@@ -880,7 +874,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         # Maker rebate (typically 2-4 bps) is NOT included in Kelly edge calculation below
         # (conservative assumption - rebate is a bonus, not relied upon for sizing)
 
-        # Compute position size (use effective_days for sizing to account for resolution lag)
+        # Compute position size
         size_usd = compute_bond_size(
             equity=portfolio["equity"],
             cash=portfolio["cash"],

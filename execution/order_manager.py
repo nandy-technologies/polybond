@@ -401,9 +401,8 @@ async def _create_or_update_position(
         try:
             end_dt = ensure_utc(end_date)
             days_remaining = max(0.01, (end_dt - datetime.now(timezone.utc)).total_seconds() / 86400)
-            effective_days = days_remaining + config.BOND_RESOLUTION_LAG_DAYS
             raw_yield = (1.0 - fill_price) / fill_price
-            ann_yield = raw_yield * (365.0 / effective_days)
+            ann_yield = raw_yield * (365.0 / days_remaining)
         except Exception:
             pass
 

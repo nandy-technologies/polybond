@@ -18,6 +18,169 @@ from utils.logger import get_logger
 
 log = get_logger("gamma_api")
 
+# ── Category mapping ─────────────────────────────────────────
+
+# Priority-ordered tag lookup: first matching tag determines category
+# Lower index = higher priority
+TAG_CATEGORY_MAPPING: dict[str, str] = {
+    # Sports (priority 1)
+    "Sports": "Sports", "Soccer": "Sports", "NBA": "Sports", "Basketball": "Sports",
+    "Hockey": "Sports", "NHL": "Sports", "EPL": "Sports", "NCAA": "Sports",
+    "NCAA CBB": "Sports", "ncaab": "Sports", "La Liga": "Sports", "Serie A": "Sports",
+    "bundesliga": "Sports", "Ligue 1": "Sports", "Champions League": "Sports",
+    "NFL": "Sports", "Golf": "Sports", "FIFA World Cup": "Sports", "PGA TOUR": "Sports",
+    "NCAA Football": "Sports", "CFB": "Sports", "NFL Draft": "Sports",
+    "NCAA Basketball": "Sports", "Conference Championship": "Sports", "CWBB": "Sports",
+    "UCL": "Sports", "UEFA Europa League": "Sports", "EFL Cup": "Sports",
+    "Carabao Cup": "Sports", "Stanley Cup": "Sports", "NBA Finals": "Sports",
+    "NBA Champion": "Sports", "Big 10": "Sports", "Big 12": "Sports", "ACC": "Sports",
+    "Big East": "Sports", "football": "Sports", "mvp": "Sports", "CBB": "Sports",
+    "Parlays": "Sports",
+    
+    # Crypto (priority 2)
+    "Crypto": "Crypto", "Bitcoin": "Crypto", "Ethereum": "Crypto", "token launch": "Crypto",
+    "fdv": "Crypto", "Token Sales": "Crypto", "Airdrops": "Crypto", "Crypto Prices": "Crypto",
+    "Stablecoins": "Crypto", "MicroStrategy": "Crypto", "Metamask": "Crypto",
+    "MegaETH": "Crypto", "Paradex": "Crypto", "exchange": "Crypto", "cobie": "Crypto",
+    "bitboy": "Crypto", "Based": "Crypto", "EdgeX": "Crypto", "Variational": "Crypto",
+    "StandX": "Crypto",
+    
+    # US Politics (priority 3) — "Politics" tag only counts if no geo tags present
+    "Politics": "US Politics",  # Generic politics - special handling in classify_category()
+    "Trump": "US Politics", "Trump Presidency": "US Politics", "Elections": "US Politics",
+    "US Election": "US Politics", "Midterms": "US Politics", "Congress": "US Politics",
+    "Senate": "US Politics", "Primaries": "US Politics", "NYC Mayor": "US Politics",
+    "New York City": "US Politics", "Immigration": "US Politics", "Immigration/Border": "US Politics",
+    "U.S. Politics": "US Politics", "Taxes": "US Politics", "Economic Policy": "US Politics",
+    "Gov Shutdown": "US Politics", "Approval": "US Politics", "America Party": "US Politics",
+    "Mayoral Elections": "US Politics", "H-1B": "US Politics", "Epstein": "US Politics",
+    "Courts": "US Politics", "Supreme Court": "US Politics", "Zohran Mamdani": "US Politics",
+    "Mamdani": "US Politics", "New York": "US Politics", "nyc": "US Politics",
+    "Pierre": "US Politics", "Canadian Election": "US Politics", "California": "US Politics",
+    "Cannabis": "US Politics", "Marijuana": "US Politics", "abortion": "US Politics",
+    "house": "US Politics", "legal": "US Politics",
+    
+    # Geopolitics (priority 4)
+    "Geopolitics": "Geopolitics", "World": "Geopolitics", "Foreign Policy": "Geopolitics",
+    "Ukraine": "Geopolitics", "Israel": "Geopolitics", "Middle East": "Geopolitics",
+    "Gaza": "Geopolitics", "Iran": "Geopolitics", "China": "Geopolitics", "russia": "Geopolitics",
+    "putin": "Geopolitics", "Syria": "Geopolitics", "Turkey": "Geopolitics", "nato": "Geopolitics",
+    "Military Actions": "Geopolitics", "Global Elections": "Geopolitics",
+    "World Elections": "Geopolitics", "Trade War": "Geopolitics", "nuclear": "Geopolitics",
+    "Ukraine Peace Deal": "Geopolitics", "Ukraine Map": "Geopolitics",
+    "Russia Capture": "Geopolitics", "Trump-Zelenskyy": "Geopolitics",
+    "Trump-Putin": "Geopolitics", "Trump x al-Sharaa": "Geopolitics",
+    "Trump-Netanyahu": "Geopolitics", "Trump x Saudi": "Geopolitics",
+    "Greenland": "Geopolitics", "India-Pakistan": "Geopolitics", "Khamenei": "Geopolitics",
+    "Lebanon": "Geopolitics", "north korea": "Geopolitics", "South Korea": "Geopolitics",
+    "hamas": "Geopolitics", "palestine": "Geopolitics", "crimea": "Geopolitics",
+    "Mexico Cartel War": "Geopolitics", "Macro Geopolitics": "Geopolitics",
+    "Security Guarantee": "Geopolitics", "india": "Geopolitics", "pakistan": "Geopolitics",
+    "taiwan": "Geopolitics", "brazil": "Geopolitics", "argentina": "Geopolitics",
+    "Venezuela": "Geopolitics", "France": "Geopolitics", "Germany": "Geopolitics",
+    "Poland": "Geopolitics", "Hungary": "Geopolitics", "Indonesia": "Geopolitics",
+    "uk": "Geopolitics", "Starmer": "Geopolitics", "Macron": "Geopolitics",
+    "keir": "Geopolitics", "Grooming Gangs": "Geopolitics", "eu": "Geopolitics",
+    "obama": "Geopolitics",
+    
+    # Tech (priority 5)
+    "Tech": "Tech", "Big Tech": "Tech", "AI": "Tech", "OpenAI": "Tech", "GPT-5": "Tech",
+    "Grok": "Tech", "Tesla": "Tech", "Apple": "Tech", "DeepSeek": "Tech", "SpaceX": "Tech",
+    "Claude 5": "Tech", "TikTok": "Tech", "sam altman": "Tech", "Elon Musk": "Tech",
+    "Robot": "Tech", "Optimus": "Tech", "humanoid": "Tech", "google": "Tech",
+    "self driving": "Tech", "llm": "Tech", "artificial intelligence": "Tech",
+    "chatgpt": "Tech", "Altman": "Tech", "Sam": "Tech", "Acquisitions": "Tech",
+    "Databricks": "Tech", "Stripe": "Tech", "anthropic": "Tech", "Consensys": "Tech",
+    "GTA VI": "Tech", "video games": "Tech", "Games": "Tech",
+    
+    # Finance (priority 6)
+    "Finance": "Finance", "Business": "Finance", "Economy": "Finance", "Fed Rates": "Finance",
+    "Fed": "Finance", "Jerome Powell": "Finance", "Stocks": "Finance", "IPOs": "Finance",
+    "IPO": "Finance", "Tariffs": "Finance", "Macro Indicators": "Finance",
+    "Pre-Market": "Finance", "Earn 4%": "Finance", "economics": "Finance",
+    "currency": "Finance", "GDP": "Finance", "Treasuries": "Finance", "sec": "Finance",
+    "Fannie Mae": "Finance", "Freddie Mac": "Finance", "NYSE": "Finance",
+    
+    # Culture (priority 7)
+    "Culture": "Culture", "Awards": "Culture", "Movies": "Culture", "Oscars": "Culture",
+    "Music": "Culture", "Celebrities": "Culture", "Taylor Swift": "Culture",
+    "BLACKPINK": "Culture", "Kpop": "Culture", "K-pop": "Culture", "Creators": "Culture",
+    "All-In": "Culture", "Jason Calacanis": "Culture", "Featured": "Culture",
+    "Best of 2025": "Culture", "2025 Predictions": "Culture", "Weather": "Culture",
+    "Climate & Science": "Culture", "Science": "Culture", "DC": "Culture",
+    "redskins": "Culture", "PUP": "Culture", "2026 Winter Games": "Culture",
+    "Global Temp": "Culture",
+}
+
+# Keyword-based fallback when event tags are unavailable (case-insensitive)
+# Order matters: more specific keywords should be checked first
+KEYWORD_CATEGORY_MAPPING: list[tuple[list[str], str]] = [
+    # US Politics keywords (check before Sports to avoid "win the" matching elections)
+    (["trump", "biden", "president", "election", "vote", "congress", "senate",
+      "governor", "mayor"], "US Politics"),
+    # Geopolitics keywords
+    (["ukraine", "russia", "iran", "israel", "gaza", "war", "strike", "nato",
+      "ceasefire", "peace deal"], "Geopolitics"),
+    # Crypto keywords
+    (["bitcoin", "btc", "ethereum", "eth", "crypto", "token", "blockchain",
+      "solana", "sol"], "Crypto"),
+    # Tech keywords
+    (["ai", "gpt", "openai", "apple", "google", "tesla", "spacex", "robot"], "Tech"),
+    # Finance keywords
+    (["fed", "interest rate", "gdp", "inflation", "stock", "ipo", "s&p", "nasdaq"], "Finance"),
+    # Sports keywords (check last since "win the" is generic)
+    (["nba", "nfl", "nhl", "epl", "premier league", "serie a", "la liga",
+      "champions league", "ncaa", "vs.", "win the", "world cup"], "Sports"),
+]
+
+
+def classify_category(tags: list[str], question: str) -> str:
+    """Classify a market into one of 8 risk categories using event tags and question keywords.
+    
+    Parameters
+    ----------
+    tags:
+        List of tag labels from the Gamma API event.
+    question:
+        The market question text (used for fallback when tags don't match).
+    
+    Returns
+    -------
+    One of: "Sports", "Crypto", "US Politics", "Geopolitics", "Tech", "Finance", "Culture", "Other"
+    """
+    # Defensive: handle None/invalid inputs
+    if not isinstance(tags, list):
+        tags = []
+    if not isinstance(question, str):
+        question = ""
+    
+    # First pass: check tags against mapping in priority order
+    # We iterate through tags and find the highest-priority match
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        if tag in TAG_CATEGORY_MAPPING:
+            category = TAG_CATEGORY_MAPPING[tag]
+            # Special handling for "Politics" tag: only use if no geo-specific tags present
+            if tag == "Politics":
+                # Check if there are any geo-specific tags that would override
+                geo_tags = {"Ukraine", "Israel", "China", "russia", "Iran", "Gaza", "Syria",
+                           "Turkey", "France", "Germany", "uk", "brazil", "taiwan", "india"}
+                if any(t in geo_tags for t in tags):
+                    continue  # Skip generic "Politics" if geo tags exist
+            return category
+    
+    # Second pass: keyword fallback on question text
+    if question:
+        question_lower = question.lower()
+        for keywords, category in KEYWORD_CATEGORY_MAPPING:
+            if any(kw in question_lower for kw in keywords):
+                return category
+    
+    # Default fallback
+    return "Other"
+
+
 # ── Rate limiting ────────────────────────────────────────────
 
 
@@ -181,6 +344,80 @@ def _normalise_market(raw: dict) -> dict:
             if k in raw
         }).decode() if any(k in raw for k in ("category", "tags", "description", "outcomes", "tokens", "clobTokenIds", "negRisk")) else None,
     }
+
+
+async def _fetch_event_tags(event_slugs: list[str]) -> dict[str, list[str]]:
+    """Batch-fetch event tags from Gamma API.
+    
+    Parameters
+    ----------
+    event_slugs:
+        List of unique event slugs to fetch.
+    
+    Returns
+    -------
+    Dict mapping event_slug -> list of tag labels.
+    """
+    if not event_slugs:
+        return {}
+    
+    # Gamma API's /events endpoint supports pagination but not bulk slug lookup
+    # We fetch events in batches and build the mapping
+    # Typical event count is 100-500, so we paginate through all events
+    
+    slug_to_tags: dict[str, list[str]] = {}
+    offset = 0
+    page_size = 100
+    target_slugs = set(event_slugs)
+    
+    # We'll fetch up to 10 pages (1000 events) to find our slugs
+    # This should cover 99%+ of active events
+    max_pages = 10
+    
+    for page_num in range(max_pages):
+        url = f"{config.GAMMA_API_BASE}/events"
+        params = {"limit": str(page_size), "offset": str(offset)}
+        
+        data = await _get_json(url, params=params)
+        if not data:
+            break
+        
+        events = data if isinstance(data, list) else data.get("data", data.get("events", []))
+        if not isinstance(events, list) or not events:
+            break
+        
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            slug = event.get("slug", "")
+            if slug and slug in target_slugs:
+                tags_raw = event.get("tags", [])
+                # Extract tag labels (tags may be dicts with {"label": "..."} or just strings)
+                tags = []
+                if isinstance(tags_raw, list):
+                    for tag in tags_raw:
+                        if isinstance(tag, dict):
+                            label = tag.get("label", "")
+                            if label and isinstance(label, str):
+                                tags.append(label)
+                        elif isinstance(tag, str) and tag:
+                            tags.append(tag)
+                slug_to_tags[slug] = tags
+        
+        # Stop if we found all our target slugs
+        if len(slug_to_tags) >= len(target_slugs):
+            break
+        
+        # Stop if we got a short page (end of results)
+        if len(events) < page_size:
+            break
+        
+        offset += page_size
+    
+    if slug_to_tags:
+        log.debug("event_tags_fetched", found=len(slug_to_tags), requested=len(event_slugs))
+    
+    return slug_to_tags
 
 
 # ── Public API ───────────────────────────────────────────────
@@ -355,6 +592,31 @@ async def sync_top_markets() -> int:
         log.warning("sync_top_markets_empty")
         return 0
 
+    # ── Category classification ──────────────────────────────────────────
+    # Collect unique event_slugs from markets
+    event_slugs = list({m.get("event_slug", "") for m in markets if m.get("event_slug")})
+    
+    # Batch-fetch event tags from Gamma API
+    slug_to_tags: dict[str, list[str]] = {}
+    if event_slugs:
+        try:
+            slug_to_tags = await _fetch_event_tags(event_slugs)
+        except Exception as exc:
+            log.warning("fetch_event_tags_failed", error=str(exc))
+    
+    # Classify each market
+    for m in markets:
+        event_slug = m.get("event_slug", "")
+        tags = slug_to_tags.get(event_slug, []) if event_slug else []
+        question = m.get("question", "")
+        category = classify_category(tags, question)
+        m["category"] = category
+    
+    log.info("markets_classified", 
+             total=len(markets), 
+             with_event_slug=len([m for m in markets if m.get("event_slug")]),
+             tag_coverage=len(slug_to_tags))
+
     # Batch upsert under a single lock acquisition for performance
     _upsert_sql = """
         INSERT INTO markets (id, condition_id, question, slug, event_slug, event_title, active, volume, liquidity, end_date, outcome, resolved_at, meta, category, neg_risk)
@@ -465,7 +727,7 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
         try:
             rows = await asyncio.to_thread(
                 query,
-                "SELECT id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta "
+                "SELECT id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta, category "
                 "FROM markets WHERE id = ?",
                 [market_id],
             )
@@ -491,6 +753,7 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                     "outcome": row[9],
                     "resolved_at": _resolved_at,
                     "meta": row[11],
+                    "category": row[12],
                 }
                 # Refresh Redis cache with DB data
                 try:
@@ -509,6 +772,21 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
         return None
 
     market = _normalise_market(data)
+    
+    # Classify category for this market
+    event_slug = market.get("event_slug", "")
+    if event_slug:
+        try:
+            slug_to_tags = await _fetch_event_tags([event_slug])
+            tags = slug_to_tags.get(event_slug, [])
+        except Exception as exc:
+            log.debug("fetch_tags_failed_single", market_id=market_id, error=str(exc))
+            tags = []
+    else:
+        tags = []
+    
+    category = classify_category(tags, market.get("question", ""))
+    market["category"] = category
 
     # Cache in Redis (1 hour TTL)
     try:
@@ -521,8 +799,8 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
         await asyncio.to_thread(
             execute,
             """
-            INSERT INTO markets (id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO markets (id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta, category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 question    = EXCLUDED.question,
                 event_slug  = EXCLUDED.event_slug,
@@ -532,7 +810,8 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                 end_date    = EXCLUDED.end_date,
                 outcome     = EXCLUDED.outcome,
                 resolved_at = EXCLUDED.resolved_at,
-                meta        = EXCLUDED.meta
+                meta        = EXCLUDED.meta,
+                category    = EXCLUDED.category
             """,
             [
                 market["id"],
@@ -547,6 +826,7 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                 market["outcome"],
                 market["resolved_at"].isoformat() if market["resolved_at"] else None,
                 market["meta"],
+                category,
             ],
         )
     except Exception as exc:

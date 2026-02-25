@@ -8,3 +8,4 @@ data/*.duckdb.wal
 *.egg-info/
 dist/
 build/
+logs/

@@ -1065,7 +1065,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         current_event_exposure = event_exposure.get(candidate_event, 0.0)
         if max_event_exposure > 0 and current_event_exposure + size_usd > max_event_exposure:
             log.info("bond_event_cap_hit", 
-                    event=candidate_event[:40],
+                    event_slug=candidate_event[:40],
                     current_exposure=f"{current_event_exposure:.2f}",
                     attempted_add=f"{size_usd:.2f}",
                     cap=f"{max_event_exposure:.2f}",

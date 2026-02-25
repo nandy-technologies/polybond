@@ -285,7 +285,10 @@ def create_app() -> FastAPI:
                 bond_conc_sigma=config.BOND_CONC_SIGMA,
                 bond_div_decay=config.BOND_DIV_DECAY,
                 bond_cooldown_tau=config.BOND_COOLDOWN_TAU,
-                bond_max_order_pct=config.BOND_MAX_ORDER_PCT,
+                bond_max_order_pct=config.BOND_MAX_ORDER_PCT,  # static fallback shown; dynamic computed live
+                bond_max_order_floor=config.BOND_MAX_ORDER_FLOOR,
+                bond_max_order_ceiling=config.BOND_MAX_ORDER_CEILING,
+                bond_max_order_midpoint=config.BOND_MAX_ORDER_MIDPOINT,
                 bond_auto_exit_severity=config.BOND_AUTO_EXIT_SEVERITY,
                 bond_auto_exit_severity_tight=config.BOND_AUTO_EXIT_SEVERITY_TIGHT,
                 # bond_resolution_lag_days removed

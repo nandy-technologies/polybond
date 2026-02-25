@@ -464,12 +464,15 @@ async def place_limit_buy(
     from py_clob_client.order_builder.constants import BUY
     from py_clob_client.clob_types import OrderArgs, PartialCreateOrderOptions, OrderType
 
+    from strategies.bond_scanner import dynamic_max_order_pct
+
     base = equity if equity is not None else config.BOND_SEED_CAPITAL
-    max_order = base * config.BOND_MAX_ORDER_PCT
+    max_pct = dynamic_max_order_pct(base)
+    max_order = base * max_pct
     if size_usd > max_order:
         raise ValueError(
             f"Order size ${size_usd:.2f} exceeds max ${max_order:.2f} "
-            f"({config.BOND_MAX_ORDER_PCT:.0%} of equity ${base:.2f})"
+            f"({max_pct:.0%} of equity ${base:.2f})"
         )
 
     def _place():

@@ -103,7 +103,10 @@ BOND_CONC_SIGMA: float = float(os.getenv("BOND_CONC_SIGMA", "0.50"))
 BOND_DIV_DECAY: float = float(os.getenv("BOND_DIV_DECAY", "10.0"))
 
 BOND_COOLDOWN_TAU: float = float(os.getenv("BOND_COOLDOWN_TAU", "3600"))
-BOND_MAX_ORDER_PCT: float = float(os.getenv("BOND_MAX_ORDER_PCT", "0.10"))
+BOND_MAX_ORDER_PCT: float = float(os.getenv("BOND_MAX_ORDER_PCT", "0.10"))  # static fallback / ceiling
+BOND_MAX_ORDER_FLOOR: float = float(os.getenv("BOND_MAX_ORDER_FLOOR", "0.05"))
+BOND_MAX_ORDER_CEILING: float = float(os.getenv("BOND_MAX_ORDER_CEILING", "0.35"))
+BOND_MAX_ORDER_MIDPOINT: float = float(os.getenv("BOND_MAX_ORDER_MIDPOINT", "1000"))
 BOND_AUTO_EXIT_SEVERITY: float = float(os.getenv("BOND_AUTO_EXIT_SEVERITY", "3.0"))
 BOND_AUTO_EXIT_SEVERITY_TIGHT: float = float(os.getenv("BOND_AUTO_EXIT_SEVERITY_TIGHT", "2.0"))
 BOND_EXIT_ESCALATION_SECS: int = int(os.getenv("BOND_EXIT_ESCALATION_SECS", "120"))

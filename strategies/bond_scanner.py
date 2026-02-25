@@ -11,6 +11,25 @@ import math
 import time
 from datetime import datetime, timezone
 
+
+def dynamic_max_order_pct(equity: float) -> float:
+    """Continuous max order % that decays with portfolio size.
+
+    floor + (ceiling - floor) / (1 + equity / midpoint)
+
+    Defaults (config):  floor=5%, ceiling=35%, midpoint=$1000
+      $100  → 32.3%    (need concentration to clear minimums)
+      $500  → 25.0%
+      $1000 → 20.0%
+      $5000 → 10.0%
+      $50K  → 5.6%
+    """
+    from . import config
+    floor = config.BOND_MAX_ORDER_FLOOR
+    ceiling = config.BOND_MAX_ORDER_CEILING
+    midpoint = config.BOND_MAX_ORDER_MIDPOINT
+    return floor + (ceiling - floor) / (1.0 + equity / midpoint)
+
 # Lock to prevent double order placement during concurrent scan cycles
 _execute_lock = asyncio.Lock()
 
@@ -269,8 +288,9 @@ def compute_bond_size(
     score_weight = math.sqrt(max(opp_score, 0.0))
     size *= score_weight
 
-    # Clamp to max order percentage of equity
-    max_order = equity * config.BOND_MAX_ORDER_PCT
+    # Clamp to dynamic max order percentage of equity
+    max_pct = dynamic_max_order_pct(equity)
+    max_order = equity * max_pct
     size = min(size, max_order)
 
     return max(0.0, size)

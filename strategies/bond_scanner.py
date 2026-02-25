@@ -230,15 +230,14 @@ def compute_bond_size(
     # Polymarket fee: fee_rate * min(price, 1-price) per share
     fee_rate = fee_rate_bps / 10000.0
     fee_cost = fee_rate * min(price, 1.0 - price)
-    exec_deg = _measured_exec_degradation if _measured_exec_degradation is not None else config.BOND_EXECUTION_DEGRADATION
-    edge = (q_mean - price) * (1.0 - exec_deg) - fee_cost
+    edge = (q_mean - price) * (1.0 - config.BOND_EXECUTION_DEGRADATION) - fee_cost
 
     if edge <= 0:
         log.debug("bond_negative_edge", price=f"{price:.3f}", q_mean=f"{q_mean:.4f}", edge=f"{edge:.4f}")
         return 0.0
 
     # Adjust price for execution costs (fees, slippage, timing)
-    p_adj = price + exec_deg * (1.0 - price)
+    p_adj = price + config.BOND_EXECUTION_DEGRADATION * (1.0 - price)
 
     # Drawdown-constrained Kelly (reuse existing module)
     kelly = _drawdown_capped_kelly(
@@ -361,9 +360,8 @@ async def scan_bond_candidates() -> list[dict]:
     """Scan all active markets for bond candidates and return scored list."""
     _scan_start = time.monotonic()
 
-    # Refresh rolling Kelly stats and measured execution degradation once per scan cycle
+    # Refresh rolling Kelly stats once per scan cycle
     await _refresh_rolling_kelly_stats()
-    await _refresh_measured_exec_degradation()
 
     # Compute portfolio-proportional scales for scoring
     _portfolio_for_scales = await get_bond_portfolio_state()

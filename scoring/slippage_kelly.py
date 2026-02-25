@@ -65,7 +65,7 @@ def kelly_with_slippage(
             break
 
         f_new = f - g_prime / g_pp
-        f = max(0.0, min(f_init if f_init is not None else 1.0, f_new))
+        f = max(0.0, min(1.0, f_new))
 
         if abs(g_prime) < 1e-8:
             break

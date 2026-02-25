@@ -394,9 +394,12 @@ async def scan_bond_candidates() -> list[dict]:
                 if stale_ob is not None:
                     stale_price = stale_ob.get("best_ask", 0)
                     if stale_price > 0:
+                        # Soft pre-filter: skip very low prices (not bond territory)
+                        # and prices at or above 1.0 (no edge). No hard upper cap —
+                        # scoring naturally penalizes low-yield (high-price) candidates.
                         if stale_price < config.BOND_MIN_ENTRY_PRICE * config.BOND_PREFILTER_DISCOUNT:
                             continue
-                        if stale_price > config.BOND_MAX_ENTRY_PRICE:
+                        if stale_price >= 1.0:
                             continue
 
                 # Prioritize fresh WS data
@@ -452,7 +455,11 @@ async def scan_bond_candidates() -> list[dict]:
                 if price <= 0 or price >= 1:
                     continue
                 # Bond strategy only applies to high-confidence tokens (near-certain resolution to $1)
+                # Soft floor: skip prices below min entry (not bond territory)
+                # No hard ceiling — scoring penalizes low-yield naturally
                 if price < config.BOND_MIN_ENTRY_PRICE:
+                    continue
+                if price >= 1.0:
                     continue
 
                 # Fix #29: validate orderbook depth to prevent corrupted WS data

@@ -207,7 +207,8 @@ BOND_TAKER_OB_MAX_AGE: float = float(os.getenv("BOND_TAKER_OB_MAX_AGE", "5"))
 BOND_KELLY_ROLLING_WINDOW: int = int(os.getenv("BOND_KELLY_ROLLING_WINDOW", "50"))
 
 # -- Order manager parameters ---------------------------------------------------
-BOND_STOP_LOSS_PCT: float = float(os.getenv("BOND_STOP_LOSS_PCT", "0.20"))
+BOND_STOP_LOSS_PCT: float = float(os.getenv("BOND_STOP_LOSS_PCT", "0.20"))  # Upper bound for dynamic stop
+BOND_STOP_LOSS_K: float = float(os.getenv("BOND_STOP_LOSS_K", "2.0"))  # Stop = K * max_gain_pct
 BOND_EXIT_THRESHOLD_DAYS: float = float(os.getenv("BOND_EXIT_THRESHOLD_DAYS", "14.0"))
 BOND_SEVERITY_ALERT_THRESHOLD: float = float(os.getenv("BOND_SEVERITY_ALERT_THRESHOLD", "0.05"))
 BOND_STRANDED_EXIT_HOURS: int = int(os.getenv("BOND_STRANDED_EXIT_HOURS", "1"))

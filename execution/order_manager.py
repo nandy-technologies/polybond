@@ -491,11 +491,15 @@ async def update_position_mtm() -> None:
             # If it drops below our entry, the market disagrees with our bet.
             edge = current_price - entry_price
 
-            # Fix #12: position-level stop loss - hard cap at -20% from entry
+            # Dynamic stop loss: scales with entry price so downside risk
+            # is proportional to upside. K=2 means stop = 2x the max gain %.
+            # At 0.92 entry: max gain = 8.7%, stop = 17.4%
+            # At 0.80 entry: max gain = 25%, stop = 50% (capped at BOND_STOP_LOSS_PCT)
+            _dynamic_stop = min(config.BOND_STOP_LOSS_PCT, ((1.0 - entry_price) / entry_price) * config.BOND_STOP_LOSS_K)
             loss_pct = (entry_price - current_price) / entry_price if entry_price > 0 else 0
-            if loss_pct > config.BOND_STOP_LOSS_PCT:
+            if loss_pct > _dynamic_stop:
                 log.warning("bond_stop_loss_triggered", pos_id=pos_id, loss_pct=f"{loss_pct:.2%}",
-                            entry=f"{entry_price:.3f}", current=f"{current_price:.3f}")
+                            dynamic_stop=f"{_dynamic_stop:.2%}", entry=f"{entry_price:.3f}", current=f"{current_price:.3f}")
                 # Force immediate exit via edge check (set edge to trigger auto-exit)
                 edge = -999.0
 

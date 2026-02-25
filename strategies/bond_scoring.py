@@ -39,6 +39,17 @@ def opportunity_score(
     mq = market_quality(volume, scale=vs)
     se = spread_efficiency(spread, price)
 
+    # Defense-in-depth: if spread > 20% of ask, market is too illiquid to trust
+    if price > 0 and spread / price > 0.20:
+        import structlog
+        structlog.get_logger().warning(
+            "spread_sanity_reject",
+            spread=spread,
+            price=price,
+            spread_pct=round(spread / price * 100, 1),
+        )
+        se = 0.0
+
     # Weighted geometric mean: product(factor_i ^ weight_i) ^ (1 / sum_weights)
     w_yield = config.BOND_SCORE_WEIGHT_YIELD
     w_liq = config.BOND_SCORE_WEIGHT_LIQUIDITY

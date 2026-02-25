@@ -540,8 +540,8 @@ async def scan_bond_candidates() -> list[dict]:
     if len(candidates) > len(above_threshold):
         log.debug("funnel_stats", 
                  total_candidates=len(candidates),
-                 above_min_score=len(above_threshold),
-                 min_score=config.BOND_MIN_SCORE,
+                 above_static_min=len(above_threshold),
+                 static_min_score=config.BOND_MIN_SCORE,
                  marginal_count=len(candidates) - len(above_threshold))
 
     _scan_elapsed = round(time.monotonic() - _scan_start, 2)
@@ -811,10 +811,30 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
     # Phase 1: Collect orders to place
     batch_entries: list[dict] = []  # Each: {candidate, order_price, size_usd, neg_risk, tick_size_str, shares}
 
+    # Dynamic min score: compute from portfolio state
+    # Minimum viable order = POLYMARKET_MIN_SHARES * typical bond price (~0.95)
+    # size = cash * kelly_est * conc * div * sqrt(score)
+    # Solve for score: score = (min_order / (cash * kelly_est * conc * div))^2
+    _min_order_usd = config.POLYMARKET_MIN_SHARES * 0.95 * config.BOND_MIN_ORDER_ROUND_UP_FACTOR
+    _kelly_est = 0.15  # Conservative estimate of typical Kelly fraction after adjustments
+    _exposure_ratio = total_invested / max(equity, 1.0)
+    _conc_est = math.exp(-(_exposure_ratio ** 2) / (2.0 * config.BOND_CONC_SIGMA ** 2))
+    _n_pos = portfolio["n_positions"]
+    _div_est = 1.0 / (1.0 + _n_pos / config.BOND_DIV_DECAY)
+    _sizing_capacity = cash * _kelly_est * _conc_est * _div_est
+    if _sizing_capacity > 0:
+        _dynamic_min_score = (_min_order_usd / _sizing_capacity) ** 2
+    else:
+        _dynamic_min_score = 1.0  # No capacity = no trades
+    # Floor: never go below a tiny threshold to avoid scoring noise
+    _dynamic_min_score = max(_dynamic_min_score, 1e-4)
+    log.info("dynamic_min_score", min_score=f"{_dynamic_min_score:.6f}",
+             sizing_capacity=f"{_sizing_capacity:.2f}", min_order=f"{_min_order_usd:.2f}")
+
     # Pre-filter eligible candidates
     eligible = []
     for candidate in candidates:
-        if candidate["opportunity_score"] < config.BOND_MIN_SCORE:
+        if candidate["opportunity_score"] < _dynamic_min_score:
             continue
         market_id = candidate["market_id"]
         token_id = candidate["token_id"]

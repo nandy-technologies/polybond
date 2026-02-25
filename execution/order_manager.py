@@ -506,7 +506,7 @@ async def update_position_mtm() -> None:
             if edge <= 0:
                 # Edge gone — severity relative to max possible gain, not cost basis
                 max_gain = (1.0 - entry_price) * shares
-                severity = abs(unrealized_pnl) / max(max_gain, 1.0)
+                severity = abs(unrealized_pnl) / max(max_gain, 0.01)
                 log.warning(
                     "bond_edge_gone",
                     pos_id=pos_id,

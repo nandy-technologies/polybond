@@ -121,7 +121,7 @@ BOND_MAX_POSITION_ADDS: int = int(os.getenv("BOND_MAX_POSITION_ADDS", "2"))
 BOND_ADAPTIVE_PRICING: bool = os.getenv("BOND_ADAPTIVE_PRICING", "true").lower() == "true"
 BOND_PRICE_IMPROVE_SECS: int = int(os.getenv("BOND_PRICE_IMPROVE_SECS", "300"))
 BOND_RESOLUTION_LAG_DAYS: float = float(os.getenv("BOND_RESOLUTION_LAG_DAYS", "2.0"))
-BOND_MAX_EVENT_PCT: float = float(os.getenv("BOND_MAX_EVENT_PCT", "0.20"))
+BOND_MAX_EVENT_PCT: float = float(os.getenv("BOND_MAX_EVENT_PCT", "0.10"))
 BOND_TAKER_SCORE_THRESHOLD: float = float(os.getenv("BOND_TAKER_SCORE_THRESHOLD", "0.50"))
 BOND_TAKER_DAYS_THRESHOLD: float = float(os.getenv("BOND_TAKER_DAYS_THRESHOLD", "3.0"))
 

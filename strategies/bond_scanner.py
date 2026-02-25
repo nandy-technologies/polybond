@@ -110,13 +110,14 @@ async def _refresh_rolling_kelly_stats() -> None:
     global _rolling_wins, _rolling_losses
     try:
         rows = await aquery(
-            "SELECT status FROM bond_positions WHERE status IN ('resolved_win', 'resolved_loss') "
+            "SELECT status, COALESCE(realized_pnl, 0) as pnl FROM bond_positions "
+            "WHERE status IN ('resolved_win', 'resolved_loss', 'exited') "
             "ORDER BY closed_at DESC LIMIT ?",
             [config.BOND_KELLY_ROLLING_WINDOW],
         )
         if rows and len(rows) >= 10:
-            wins = sum(1 for (s,) in rows if s == "resolved_win")
-            losses = sum(1 for (s,) in rows if s == "resolved_loss")
+            wins = sum(1 for (s, pnl) in rows if s == "resolved_win")
+            losses = sum(1 for (s, pnl) in rows if s == "resolved_loss" or (s == "exited" and pnl < 0))
             _rolling_wins = wins
             _rolling_losses = losses
         else:

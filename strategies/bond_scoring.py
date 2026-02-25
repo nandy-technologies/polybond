@@ -37,6 +37,7 @@ def opportunity_score(
     tv = time_value(days_remaining)
     rc = resolution_confidence(bid_depth, scale=ls)
     mq = market_quality(volume, scale=vs)
+    se = spread_efficiency(spread, price)
 
     # Weighted geometric mean: product(factor_i ^ weight_i) ^ (1 / sum_weights)
     w_yield = config.BOND_SCORE_WEIGHT_YIELD
@@ -44,9 +45,10 @@ def opportunity_score(
     w_time = config.BOND_SCORE_WEIGHT_TIME
     w_rc = config.BOND_SCORE_WEIGHT_RESOLUTION
     w_mq = config.BOND_SCORE_WEIGHT_QUALITY
-    w_sum = w_yield + w_liq + w_time + w_rc + w_mq
+    w_spread = config.BOND_SCORE_WEIGHT_SPREAD
+    w_sum = w_yield + w_liq + w_time + w_rc + w_mq + w_spread
 
-    score = (ys ** w_yield * liq ** w_liq * tv ** w_time * rc ** w_rc * mq ** w_mq) ** (1.0 / w_sum)
+    score = (ys ** w_yield * liq ** w_liq * tv ** w_time * rc ** w_rc * mq ** w_mq * se ** w_spread) ** (1.0 / w_sum)
     return score
 
 

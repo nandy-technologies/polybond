@@ -303,7 +303,6 @@ def create_app() -> FastAPI:
                 domain_watch_enabled=config.DOMAIN_WATCH_ENABLED,
                 bond_stop_loss_pct=config.BOND_STOP_LOSS_PCT,
                 bond_min_entry_price=config.BOND_MIN_ENTRY_PRICE,
-                bond_max_entry_price=config.BOND_MAX_ENTRY_PRICE,
                 bond_min_volume=config.BOND_MIN_VOLUME,
                 bond_min_liquidity=config.BOND_MIN_LIQUIDITY,
                 bond_min_score=config.BOND_MIN_SCORE,

@@ -465,9 +465,17 @@ async def update_position_mtm() -> None:
 
     for pos_id, token_id, entry_price, shares, cost_basis, question, market_id, outcome, end_date, pos_status in rows:
         try:
-            # Optimization #4: Use WS data with 60s max age (looser than entry/exit which use 30s)
-            # MTM is less time-sensitive than order placement, so we tolerate slightly stale data
+            # Use WS data with 60s max age, fall back to REST for positions without WS coverage
             ob = get_orderbook(token_id, max_age=config.BOND_MTM_OB_MAX_AGE)
+            if ob is None:
+                # REST fallback — we only have a handful of open positions, so this is cheap
+                try:
+                    from execution.clob_client import get_orderbook_rest
+                    ob = await get_orderbook_rest(token_id)
+                    if ob is not None:
+                        log.debug("mtm_rest_fallback", pos_id=pos_id, token_id=token_id[:10])
+                except Exception:
+                    pass
             if ob is None:
                 continue
 

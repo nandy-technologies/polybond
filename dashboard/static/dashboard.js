@@ -56,9 +56,11 @@ var _initialLoadDone=false;
 
   // -- Copy toast --
   var toastTimer=null;
-  function showCopyToast(msg){
+  function showCopyToast(msg,isError){
     var t=document.getElementById('copy-toast');
     t.textContent=msg||'Copied to clipboard';
+    if(isError){t.style.borderColor='var(--red, #c0392b)';t.style.color='var(--red, #c0392b)';}
+    else{t.style.borderColor='';t.style.color='';}
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer=setTimeout(function(){t.classList.remove('show');},1500);
@@ -72,8 +74,8 @@ var _initialLoadDone=false;
       if(navigator.clipboard){
         navigator.clipboard.writeText(walletAddr).then(function(){
           showCopyToast('Copied!');
-        }).catch(function(){ showCopyToast('Copy failed'); });
-      }else{ showCopyToast('Copy not available (HTTPS required)'); }
+        }).catch(function(){ showCopyToast('Copy failed',true); });
+      }else{ showCopyToast('Copy not available (HTTPS required)',true); }
     });
   }
   var qrBtn=document.getElementById('wallet-qr-btn');
@@ -90,8 +92,8 @@ var _initialLoadDone=false;
   if(fullAddr){
     fullAddr.addEventListener('click',function(){
       if(navigator.clipboard){
-        navigator.clipboard.writeText(walletAddr).then(function(){showCopyToast('Address copied!');}).catch(function(){showCopyToast('Copy failed');});
-      }else{ showCopyToast('Copy not available (HTTPS required)'); }
+        navigator.clipboard.writeText(walletAddr).then(function(){showCopyToast('Address copied!');}).catch(function(){showCopyToast('Copy failed',true);});
+      }else{ showCopyToast('Copy not available (HTTPS required)',true); }
     });
   }
 
@@ -926,7 +928,7 @@ var _initialLoadDone=false;
               ? 'Order: $'+(d.size_usd||0).toFixed(2)+' @ '+(d.price||0).toFixed(3)
               : 'Exit @ '+(d.price||0).toFixed(3));
       }).catch(function(e){
-          showCopyToast('Error: '+e.message);
+          showCopyToast('Error: '+e.message,true);
       }).finally(function(){
           _pendingTrades.delete(key);
           setTimeout(loadWatchlist, 1000);
@@ -969,8 +971,8 @@ var _initialLoadDone=false;
         body:JSON.stringify({market_id:marketId,token_id:tokenId})
       }).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
         if(d.ok){showCopyToast('Exit order placed');loadPositions();loadPendingOrders();}
-        else{showCopyToast('Error: '+(d.error||'Unknown'));}
-      }).catch(function(e){showCopyToast('Error: '+e.message);}).finally(function(){if(btn)btn.disabled=false;});
+        else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
+      }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
     });
   }
 
@@ -983,8 +985,8 @@ var _initialLoadDone=false;
         body:JSON.stringify({order_id:orderId,clob_order_id:clobOrderId})
       }).then(function(r){return r.json()}).then(function(d){
         if(d.ok){showCopyToast('Order cancelled');loadPendingOrders();}
-        else{showCopyToast('Error: '+(d.error||'Unknown'));}
-      }).catch(function(e){showCopyToast('Error: '+e.message);}).finally(function(){if(btn)btn.disabled=false;});
+        else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
+      }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
     });
   }
 
@@ -997,8 +999,8 @@ var _initialLoadDone=false;
         body:JSON.stringify({market_id:marketId,token_id:tokenId,outcome:outcome})
       }).then(function(r){return r.json()}).then(function(d){
         if(d.ok){showCopyToast('Buy order placed: $'+(d.size_usd||0).toFixed(2)+' @ '+(d.price||0).toFixed(3));loadOpportunities();loadPendingOrders();}
-        else{showCopyToast('Error: '+(d.error||'Unknown'));}
-      }).catch(function(e){showCopyToast('Error: '+e.message);}).finally(function(){if(btn)btn.disabled=false;});
+        else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
+      }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
     });
   }
 
@@ -1064,8 +1066,10 @@ var _initialLoadDone=false;
   fetchStatus();
   setInterval(fetchStatus,window.DASHBOARD_CONFIG.tradingStatusPollMs);
 })();
-function attachScrollFade(root){
-  (root||document).querySelectorAll('.table-wrap').forEach(function(tw){
+function attachScrollFade(container){
+  var root=container||document;
+  var wraps=root.classList&&root.classList.contains('table-wrap')?[root]:root.querySelectorAll('.table-wrap');
+  wraps.forEach(function(tw){
     if(!tw._sf){
       tw._sf=1;
       var update=function(){tw.classList.toggle('scrolled',tw.scrollLeft<tw.scrollWidth-tw.clientWidth-2);};

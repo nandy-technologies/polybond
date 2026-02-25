@@ -113,7 +113,7 @@
         <h2>Key Metrics</h2>
         <div class="kpi-hero-row">
           <div class="stat-card stat-card-hero">
-            {% set equity = (overview.wallet_usdc or 0) + (overview.invested or 0) %}
+            {% set equity = (overview.wallet_usdc or 0) + (overview.invested or 0) + (overview.unrealized_pnl or 0) %}
             <div class="value" id="kpi-wallet"><span class="bal-val">${{ "{:,.2f}".format(equity) }}</span></div>
             <div class="label">Equity</div>
             <div class="sublabel" id="kpi-wallet-sub">${{ "{:,.2f}".format(overview.wallet_usdc or 0) }} cash · ${{ "{:,.2f}".format(overview.invested or 0) }} invested · ${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }} on-chain · {{ "{:,.4f}".format(overview.wallet_pol or 0) }} POL</div>
@@ -535,7 +535,7 @@
       tradingStatusPollMs: {{ trading_status_poll_ms }},
       minBuyableUsd: {{ min_buyable_usd }},
       drawdownWarnPct: {{ drawdown_warn_pct }},
-      haltDrawdownPct: {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}
+      haltDrawdownPct: {{ (bond_halt_drawdown_pct * 100)|round|int }}
     };
   </script>
   <script src="/static/dashboard.js"></script>

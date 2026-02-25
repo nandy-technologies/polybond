@@ -478,6 +478,7 @@
     .bal-toggle input:checked + .bal-switch::after { transform: translateX(14px); background: var(--accent); }
     .bal-val { transition: filter 0.2s ease; }
     .bal-hidden .bal-val { filter: blur(8px) !important; user-select: none; }
+    body.bal-hidden .chart-container canvas { filter: blur(20px); }
     .bal-chart-wrap { position: relative; }
     /* bal-chart-mask removed — dead code */
 

@@ -12,6 +12,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from zoneinfo import ZoneInfo
+
 import config
 from storage.db import aquery
 from utils import log_id
@@ -250,7 +252,7 @@ def create_app() -> FastAPI:
                 module_counts=module_counts,
                 uptime=_format_uptime(),
                 rendered_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                rendered_at_et=datetime.now(timezone.utc).strftime("%H:%M") + " ET",
+                rendered_at_et=datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M") + " ET",
                 bond_enabled=config.BOND_ENABLED,
                 sizing_formula=SIZING_FORMULA,
                 equity_poll_ms=EQUITY_CHART_POLL_MS,
@@ -722,7 +724,7 @@ def create_app() -> FastAPI:
 
             try:
                 from strategies.bond_scanner import (
-                    compute_bond_size, get_bond_portfolio_state, _parse_token_ids,
+                    compute_bond_size, get_bond_portfolio_state,
                     _bond_wins, _bond_losses,
                 )
                 from execution.clob_client import (

@@ -302,6 +302,15 @@ def create_app() -> FastAPI:
                 bond_scan_interval=config.BOND_SCAN_INTERVAL,
                 domain_watch_enabled=config.DOMAIN_WATCH_ENABLED,
                 bond_stop_loss_pct=config.BOND_STOP_LOSS_PCT,
+                bond_stop_loss_k=config.BOND_STOP_LOSS_K,
+                bond_max_category_pct=config.BOND_MAX_CATEGORY_PCT,
+                bond_score_w_yield=config.BOND_SCORE_WEIGHT_YIELD,
+                bond_score_w_liquidity=config.BOND_SCORE_WEIGHT_LIQUIDITY,
+                bond_score_w_time=config.BOND_SCORE_WEIGHT_TIME,
+                bond_score_w_resolution=config.BOND_SCORE_WEIGHT_RESOLUTION,
+                bond_score_w_quality=config.BOND_SCORE_WEIGHT_QUALITY,
+                bond_score_w_spread=config.BOND_SCORE_WEIGHT_SPREAD,
+                bond_scoring_min_floor=config.BOND_SCORING_MIN_FLOOR,
                 bond_min_entry_price=config.BOND_MIN_ENTRY_PRICE,
                 bond_min_volume=config.BOND_MIN_VOLUME,
                 bond_min_liquidity=config.BOND_MIN_LIQUIDITY,
@@ -344,6 +353,56 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         return JSONResponse(result)
+
+    @app.get("/api/bonds/strategy")
+    async def api_bonds_strategy():
+        """Live strategy stats: portfolio-proportional scales, Kelly state, scan stats, stop loss examples."""
+        try:
+            from strategies.bond_scanner import get_bond_portfolio_state, _bond_wins, _bond_losses, _last_scan_stats
+            import math
+
+            state = await get_bond_portfolio_state()
+            equity = max(state.get("equity", 0), 1.0)
+            volume_scale = min(config.BOND_VOLUME_SCALE, max(1000, equity * 50))
+            liquidity_scale = min(config.BOND_LIQUIDITY_SCALE, max(100, equity * 5))
+
+            total_trades = _bond_wins + _bond_losses
+            prior_decay = math.exp(-total_trades / config.BOND_KELLY_PRIOR_DECAY_TRADES) if total_trades > 0 else 1.0
+            eff_alpha = config.BOND_KELLY_PRIOR_ALPHA * prior_decay + _bond_wins
+            eff_beta = config.BOND_KELLY_PRIOR_BETA * prior_decay + _bond_losses
+            q_mean = round(eff_alpha / (eff_alpha + eff_beta), 4) if (eff_alpha + eff_beta) > 0 else 0
+
+            # Dynamic stop loss examples for open positions
+            stop_examples = []
+            try:
+                rows = await aquery(
+                    "SELECT question, entry_price FROM bond_positions WHERE status = 'open' ORDER BY entry_price DESC LIMIT 5")
+                k = config.BOND_STOP_LOSS_K
+                cap = config.BOND_STOP_LOSS_PCT
+                for r in rows:
+                    entry = r[1]
+                    if entry and entry > 0:
+                        max_gain = (1.0 / entry) - 1.0
+                        stop_pct = min(cap, k * max_gain)
+                        stop_examples.append({"question": r[0][:60], "entry": round(entry, 4), "stop_pct": round(stop_pct * 100, 1)})
+            except Exception:
+                pass
+
+            return JSONResponse({
+                "equity": round(equity, 2),
+                "volume_scale": round(volume_scale, 0),
+                "liquidity_scale": round(liquidity_scale, 0),
+                "eff_alpha": round(eff_alpha, 2),
+                "eff_beta": round(eff_beta, 2),
+                "q_mean": q_mean,
+                "wins": _bond_wins,
+                "losses": _bond_losses,
+                "scan_stats": _last_scan_stats,
+                "stop_examples": stop_examples,
+            })
+        except Exception as exc:
+            log.warning("strategy_api_error", error=str(exc))
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     @app.get("/api/bonds/overview")
     async def api_bonds_overview():

@@ -323,54 +323,68 @@
 
       <!-- Scoring Engine -->
       <div class="panel panel-wide">
-        <h2>Scoring Engine <span class="badge">5 factors</span></h2>
+        <h2>Scoring Engine <span class="badge">6 factors</span></h2>
         <p class="info-text" style="margin-bottom:1.25rem">
-          Final score = product of all 5 factors (multiplicative &mdash; any low factor drives score toward zero).
-          Spread Efficiency is displayed for reference but removed from the composite score (Kelly sizing handles execution risk).
+          Weighted geometric mean &mdash; weak factors drag score down but don't kill it.
+          Each factor has a configurable weight; heavier weights amplify that factor's influence.
         </p>
+        <div class="formula-box" style="margin-bottom:1.25rem">
+          score = (&prod; factor<sub>i</sub><sup>w<sub>i</sub></sup>) <sup>1/&Sigma;w</sup>
+        </div>
         <div class="table-wrap">
           <table class="config-table">
-            <thead><tr><th>Factor</th><th>Formula</th><th>Config</th><th>Description</th></tr></thead>
+            <thead><tr><th>Factor</th><th>Weight</th><th>Formula</th><th>Config</th><th>Description</th></tr></thead>
             <tbody>
               <tr>
                 <td><strong>Yield</strong></td>
+                <td>{{ bond_score_w_yield }}</td>
                 <td>tanh(annualized_yield / {{ bond_yield_scale }})</td>
                 <td>scale={{ bond_yield_scale }}</td>
                 <td class="info-text">Higher yield = higher score, diminishing returns</td>
               </tr>
               <tr>
                 <td><strong>Liquidity</strong></td>
+                <td>{{ bond_score_w_liquidity }}</td>
                 <td>depth / (depth + scale)</td>
-                <td>${{ "%.0f"|format(bond_liquidity_scale) }}</td>
+                <td>${{ "%.0f"|format(bond_liquidity_scale) }}*</td>
                 <td class="info-text">Michaelis-Menten sigmoid on ask depth</td>
               </tr>
               <tr>
                 <td><strong>Time Value</strong></td>
+                <td>{{ bond_score_w_time }}</td>
                 <td>exp(-days / tau)</td>
                 <td>tau={{ bond_time_tau }}</td>
                 <td class="info-text">Closer to resolution = higher score</td>
               </tr>
               <tr>
                 <td><strong>Exit Liquidity</strong></td>
+                <td>{{ bond_score_w_resolution }}</td>
                 <td>bid / (bid + scale)</td>
-                <td>${{ "%.0f"|format(bond_liquidity_scale) }}</td>
+                <td>${{ "%.0f"|format(bond_liquidity_scale) }}*</td>
                 <td class="info-text">Bid-side depth as exit liquidity proxy</td>
               </tr>
               <tr>
                 <td><strong>Market Quality</strong></td>
+                <td>{{ bond_score_w_quality }}</td>
                 <td>vol / (vol + scale)</td>
-                <td>${{ "%.0f"|format(bond_volume_scale) }}</td>
+                <td>${{ "%.0f"|format(bond_volume_scale) }}*</td>
                 <td class="info-text">Higher volume = more trustworthy</td>
               </tr>
-              <tr style="opacity:0.5">
-                <td><strong>Spread Efficiency</strong> <span style="font-size:0.7rem;color:var(--text-muted)">(removed)</span></td>
+              <tr>
+                <td><strong>Spread Efficiency</strong></td>
+                <td>{{ bond_score_w_spread }}</td>
                 <td>spread_penalty(price, spread)</td>
-                <td style="color:var(--text-muted)">&mdash;</td>
-                <td class="info-text">No longer in composite score &mdash; Kelly sizing handles execution risk via slippage adjustment</td>
+                <td>&mdash;</td>
+                <td class="info-text">Penalizes wide spreads relative to price</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p class="info-text" style="margin-top:0.75rem">
+          * Config defaults shown. Actual scales are <strong>portfolio-proportional</strong>:
+          <code>min(config, max(floor, equity &times; multiplier))</code>.
+          Floor = config.BOND_SCORING_MIN_FLOOR ({{ bond_scoring_min_floor }}).
+        </p>
       </div>
 
       <!-- Position Sizing -->
@@ -405,8 +419,8 @@
               </tr>
               <tr>
                 <td><strong>Max Order</strong></td>
-                <td>{{ "%.0f"|format(bond_max_order_pct * 100) }}% of cash</td>
-                <td class="info-text">Hard cap on single order size</td>
+                <td>{{ "%.0f"|format(bond_max_order_pct * 100) }}% of equity</td>
+                <td class="info-text">Hard cap on single order size; undersized orders are rejected (no round-up)</td>
               </tr>
             </tbody>
           </table>
@@ -434,8 +448,17 @@
             <span class="info-text">&mdash; GTC orders unfilled for > {{ bond_order_timeout }}h auto-cancelled</span>
           </div>
           <div class="strategy-safety-row">
-            <strong>Stop loss</strong>
-            <span class="info-text">&mdash; Exit position if adverse move exceeds {{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</span>
+            <strong>Dynamic stop loss</strong>
+            <span class="info-text">&mdash; min({{ "%.0f"|format(bond_stop_loss_pct * 100) }}%, K &times; max_gain%) where K={{ bond_stop_loss_k }}.
+            Examples: entry $0.92 &rarr; {{ "%.1f"|format(2.0 * (1.0/0.92 - 1) * 100) }}%, entry $0.95 &rarr; {{ "%.1f"|format(2.0 * (1.0/0.95 - 1) * 100) }}%</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Event concentration</strong>
+            <span class="info-text">&mdash; Cap {{ "%.0f"|format(bond_max_event_pct * 100) }}% of equity per event (includes pending orders)</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Category cap</strong>
+            <span class="info-text">&mdash; {{ "%.0f"|format(bond_max_category_pct * 100) }}% of equity per category</span>
           </div>
           <div class="strategy-safety-row">
             <strong>Scan interval</strong>
@@ -465,28 +488,53 @@
               <tr class="config-section-header"><td colspan="2">Risk Limits</td></tr>
               <tr><td>Halt Drawdown</td><td>{{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}% / min ${{ bond_halt_min_equity }}</td></tr>
               <tr><td>Daily Limits</td><td>{{ bond_max_daily_orders }} orders / {{ "%.0f"|format(bond_max_daily_capital_pct * 100) }}% capital</td></tr>
-              <tr><td>Stop Loss</td><td>{{ "%.0f"|format(bond_stop_loss_pct * 100) }}%</td></tr>
+              <tr><td>Stop Loss</td><td>min({{ "%.0f"|format(bond_stop_loss_pct * 100) }}%, K={{ bond_stop_loss_k }} &times; max_gain%)</td></tr>
               <tr><td>Auto-Exit Severity</td><td>{{ "%.1f"|format(bond_auto_exit_severity) }}x gain</td></tr>
               <tr><td>Auto-Exit Tight</td><td>{{ "%.1f"|format(bond_auto_exit_severity_tight) }}x gain</td></tr>
               <tr><td>Order Timeout</td><td>{{ bond_order_timeout }}h</td></tr>
+              <tr><td>Category Cap</td><td>{{ "%.0f"|format(bond_max_category_pct * 100) }}%</td></tr>
               <tr class="config-section-header"><td colspan="2">Scoring</td></tr>
               <tr><td>Min Score</td><td>{{ bond_min_score }}</td></tr>
               <tr><td>Yield Scale</td><td>{{ bond_yield_scale }}</td></tr>
-              <tr><td>Liquidity Scale</td><td>${{ "%.0f"|format(bond_liquidity_scale) }}</td></tr>
+              <tr><td>Liquidity Scale</td><td>${{ "%.0f"|format(bond_liquidity_scale) }} (dynamic: min(cfg, max(100, equity&times;5)))</td></tr>
               <tr><td>Time Tau</td><td>{{ bond_time_tau }} days</td></tr>
-              <tr><td>Volume Scale</td><td>${{ "%.0f"|format(bond_volume_scale) }}</td></tr>
+              <tr><td>Volume Scale</td><td>${{ "%.0f"|format(bond_volume_scale) }} (dynamic: min(cfg, max(1000, equity&times;50)))</td></tr>
+              <tr><td>Weights</td><td>yield={{ bond_score_w_yield }} liq={{ bond_score_w_liquidity }} time={{ bond_score_w_time }} res={{ bond_score_w_resolution }} qual={{ bond_score_w_quality }} spread={{ bond_score_w_spread }}</td></tr>
+              <tr><td>Min Floor</td><td>{{ bond_scoring_min_floor }}</td></tr>
               <tr class="config-section-header"><td colspan="2">Timing</td></tr>
               <tr><td>Scan Interval</td><td>{{ bond_scan_interval }}s</td></tr>
               <tr><td>Cooldown Tau</td><td>{{ bond_cooldown_tau }}s</td></tr>
               <tr><td>Adaptive Pricing</td><td>{{ bond_adaptive_pricing }} / {{ bond_price_improve_secs }}s</td></tr>
-              <!-- Resolution lag removed -->
               <tr class="config-section-header"><td colspan="2">Filters</td></tr>
-              <tr><td>Min Entry Price</td><td>${{ bond_min_entry_price }}</td></tr>
+              <tr><td>Min Entry Price</td><td>${{ bond_min_entry_price }} (soft filter, not a hard gate)</td></tr>
               <tr><td>Min Volume</td><td>${{ "{:,.0f}".format(bond_min_volume) }}</td></tr>
               <tr><td>Min Liquidity</td><td>${{ "{:,.0f}".format(bond_min_liquidity) }}</td></tr>
               <tr><td>Domain Watch</td><td>{{ domain_watch_enabled }}</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Live Strategy Stats -->
+      <div class="panel panel-wide">
+        <h2>Live Strategy Stats <span class="badge" id="strategy-live-badge">polling</span></h2>
+        <div id="strategy-live-content" style="display:grid;gap:0.75rem">
+          <div class="strategy-safety-row">
+            <strong>Portfolio Scales</strong>
+            <span class="info-text" id="strat-scales">&mdash; loading&hellip;</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Kelly State</strong>
+            <span class="info-text" id="strat-kelly">&mdash; loading&hellip;</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Last Scan</strong>
+            <span class="info-text" id="strat-scan">&mdash; loading&hellip;</span>
+          </div>
+          <div class="strategy-safety-row">
+            <strong>Stop Loss Examples</strong>
+            <span class="info-text" id="strat-stops">&mdash; loading&hellip;</span>
+          </div>
         </div>
       </div>
 

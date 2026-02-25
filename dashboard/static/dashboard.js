@@ -23,7 +23,7 @@ var _initialLoadDone=false;
       // Start/stop polling based on active tab
       if(tab.dataset.tab==='opportunities'){if(!_oppsLoaded){loadOpportunities();_oppsLoaded=true;}startOppsPolling();}else{stopOppsPolling();}
       if(tab.dataset.tab==='watchlist'){if(!_watchLoaded){loadWatchlist();_watchLoaded=true;}startWatchPolling();}else{stopWatchPolling();}
-      // strategy tab — no lazy-load needed
+      if(tab.dataset.tab==='strategy'){startStrategyPolling();}else{stopStrategyPolling();}
     });
   });
   // Restore saved tab on load
@@ -1112,5 +1112,31 @@ function attachScrollFade(container){
     if(_scrollFadeObserver)_scrollFadeObserver.observe(tw);
     update();
   });
+}
+
+// -- Strategy live stats polling --
+var _strategyTimer=null;
+function startStrategyPolling(){fetchStrategy();_strategyTimer=setInterval(fetchStrategy,30000);}
+function stopStrategyPolling(){if(_strategyTimer){clearInterval(_strategyTimer);_strategyTimer=null;}}
+function fetchStrategy(){
+  fetch(apiUrl('/api/bonds/strategy')).then(function(r){return r.json();}).then(function(d){
+    if(d.error)return;
+    var badge=document.getElementById('strategy-live-badge');
+    if(badge)badge.textContent='live';
+    var el;
+    el=document.getElementById('strat-scales');
+    if(el)el.textContent='— equity=$'+d.equity+' → volume_scale=$'+d.volume_scale+', liquidity_scale=$'+d.liquidity_scale;
+    el=document.getElementById('strat-kelly');
+    if(el)el.textContent='— prior=Beta('+d.eff_alpha+', '+d.eff_beta+'), wins='+d.wins+', losses='+d.losses+', q_mean='+d.q_mean;
+    el=document.getElementById('strat-scan');
+    if(el&&d.scan_stats&&d.scan_stats.markets_scanned!=null){
+      var s=d.scan_stats;
+      el.textContent='— '+s.markets_scanned+' markets scanned, '+s.candidates_found+' candidates, top score '+s.top_score;
+    }
+    el=document.getElementById('strat-stops');
+    if(el&&d.stop_examples&&d.stop_examples.length>0){
+      el.textContent='— '+d.stop_examples.map(function(e){return '$'+e.entry+' → '+e.stop_pct+'%';}).join(', ');
+    }else if(el){el.textContent='— no open positions';}
+  }).catch(function(){});
 }
 

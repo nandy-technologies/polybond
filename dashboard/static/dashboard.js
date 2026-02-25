@@ -417,7 +417,7 @@ var _initialLoadDone=false;
       html+='<td class="num"><span class="bal-val">'+fmtMoney(N(r.cost_basis))+'</span></td>';
       html+='<td class="num">'+N(r.shares).toFixed(1)+'</td>';
       var upnl=N(r.unrealized_pnl);
-      html+='<td class="num '+pnlClass(upnl)+'"><span class="bal-val">'+(upnl>=0?'+$':'-$')+Number(Math.abs(upnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>'+pnlBar(upnl,maxPnl)+'</td>';
+      html+='<td class="num '+pnlClass(upnl)+'"><span class="bal-val">'+(upnl>=0?'+$':'-$')+Number(Math.abs(upnl)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span></td>';
       var age=posAge(r.opened_at);
       html+='<td class="num"><span class="age-badge '+age.cls+'">'+age.text+'</span></td>';
       html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';

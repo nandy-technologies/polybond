@@ -708,6 +708,15 @@
       max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     #opps-tbl th:first-child { z-index: 3; }
+    #opps-tbl td:last-child, #opps-tbl th:last-child {
+      position: sticky; right: 0; background: var(--surface); z-index: 2;
+      border-left: 1px solid var(--border);
+    }
+    #opps-tbl th:last-child { z-index: 3; }
+    #opps-tbl tr.event-header td:last-child { background: #1b1a18; }
+    #opps-tbl tr.event-header:hover td:last-child { background: #22201b; }
+    #opps-tbl tbody tr:nth-child(even):not(.event-header):not(.event-child) td:last-child { background: #1d1d1d; }
+    #opps-tbl tbody tr:hover td:last-child { background: #1f1e1b !important; }
     .col-resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 4; }
     .col-resize-handle:hover, .col-resize-handle.active { background: var(--accent-30); }
     #opps-tbl tr.event-header td:first-child { background: #1b1a18; }

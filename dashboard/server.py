@@ -6,6 +6,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
+import orjson
 import uvicorn
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -412,9 +413,17 @@ def create_app() -> FastAPI:
     _opps_cache: dict[str, object] = {"data": None, "ts": 0.0}
     _OPPS_CACHE_TTL = OPPS_CACHE_TTL_SEC
     _opps_lock = asyncio.Lock()
-    _trade_locks: dict[str, asyncio.Lock] = {}  # per-(market_id, token_id) trade locks
-    _TRADE_LOCK_MAX = 500
-    _TRADE_LOCK_EVICT = 250
+    _trade_locks: dict[str, tuple[asyncio.Lock, float]] = {}  # per-(market_id, token_id) trade locks
+
+    def _get_trade_lock(key: str) -> asyncio.Lock:
+        now = time.time()
+        if len(_trade_locks) > 50:
+            stale = [k for k, (_, t) in _trade_locks.items() if now - t > 300]
+            for k in stale:
+                del _trade_locks[k]
+        if key not in _trade_locks:
+            _trade_locks[key] = (asyncio.Lock(), now)
+        return _trade_locks[key][0]
 
     @app.get("/api/bonds/opportunities")
     async def api_bonds_opportunities():
@@ -558,13 +567,7 @@ def create_app() -> FastAPI:
 
         # Per-market lock to prevent duplicate sell orders from double-clicks
         lock_key = f"close:{market_id}:{token_id}"
-        if lock_key not in _trade_locks:
-            if len(_trade_locks) > _TRADE_LOCK_MAX:
-                for k in list(_trade_locks.keys())[:_TRADE_LOCK_EVICT]:
-                    if not _trade_locks[k].locked():
-                        del _trade_locks[k]
-            _trade_locks[lock_key] = asyncio.Lock()
-        async with _trade_locks[lock_key]:
+        async with _get_trade_lock(lock_key):
           try:
             from storage.db import aexecute
             from execution.clob_client import place_limit_sell, get_tick_size, get_orderbook_rest
@@ -603,12 +606,11 @@ def create_app() -> FastAPI:
             tick_size_str = await get_tick_size(token_id)
 
             # Neg risk
-            import orjson as _orjson
             neg_risk = False
             try:
                 meta_rows = await aquery("SELECT meta FROM markets WHERE id = ?", [market_id])
                 if meta_rows and meta_rows[0][0]:
-                    meta = _orjson.loads(meta_rows[0][0])
+                    meta = orjson.loads(meta_rows[0][0])
                     neg_risk = meta.get("negRisk", False)
             except Exception:
                 pass
@@ -716,13 +718,7 @@ def create_app() -> FastAPI:
 
         # Per-market lock to prevent duplicate buy orders from double-clicks
         lock_key = f"buy:{market_id}:{token_id}"
-        if lock_key not in _trade_locks:
-            if len(_trade_locks) > _TRADE_LOCK_MAX:
-                for k in list(_trade_locks.keys())[:_TRADE_LOCK_EVICT]:
-                    if not _trade_locks[k].locked():
-                        del _trade_locks[k]
-            _trade_locks[lock_key] = asyncio.Lock()
-        async with _trade_locks[lock_key]:
+        async with _get_trade_lock(lock_key):
 
             try:
                 from strategies.bond_scanner import (
@@ -772,10 +768,8 @@ def create_app() -> FastAPI:
                     ask_depth = best_ask * config.BOND_LIQUIDITY_SCALE * 0.1
 
                 # Get market end_date + meta in one query
-                import orjson as _orjson
                 mkt_rows = await aquery("SELECT end_date, meta FROM markets WHERE id = ?", [market_id])
-                from datetime import datetime as _dt, timezone as _tz
-                now = _dt.now(_tz.utc)
+                now = datetime.now(timezone.utc)
                 days_remaining = config.BOND_DEFAULT_DAYS_REMAINING
                 neg_risk = False
                 if mkt_rows:
@@ -786,7 +780,7 @@ def create_app() -> FastAPI:
                             days_remaining = max(1.0, (end_dt - now).total_seconds() / 86400)
                     if meta_raw:
                         try:
-                            neg_risk = _orjson.loads(meta_raw).get("negRisk", False)
+                            neg_risk = orjson.loads(meta_raw).get("negRisk", False)
                         except Exception:
                             pass
 
@@ -867,15 +861,7 @@ def create_app() -> FastAPI:
 
         # Per-market lock to prevent duplicate concurrent orders
         lock_key = f"{market_id}:{side}"
-        if lock_key not in _trade_locks:
-            # Evict old locks to prevent unbounded growth
-            if len(_trade_locks) > _TRADE_LOCK_MAX:
-                oldest_keys = list(_trade_locks.keys())[:_TRADE_LOCK_EVICT]
-                for k in oldest_keys:
-                    if not _trade_locks[k].locked():
-                        del _trade_locks[k]
-            _trade_locks[lock_key] = asyncio.Lock()
-        async with _trade_locks[lock_key]:
+        async with _get_trade_lock(lock_key):
             if action == "buy":
                 return await _watchlist_buy(market_id, side)
             else:
@@ -949,7 +935,6 @@ def create_app() -> FastAPI:
 
             # Get market end_date for days_remaining
             date_rows = await aquery("SELECT end_date FROM markets WHERE id = ?", [market_id])
-            from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
             days_remaining = config.BOND_DEFAULT_DAYS_REMAINING  # default
             if date_rows and date_rows[0][0]:
@@ -981,7 +966,6 @@ def create_app() -> FastAPI:
             order_price = round(round(order_price / tick_size) * tick_size, 4)
 
             # Neg risk
-            import orjson
             neg_risk = False
             try:
                 meta = orjson.loads(meta_str)
@@ -1064,7 +1048,6 @@ def create_app() -> FastAPI:
             tick_size_str = await get_tick_size(token_id)
 
             # Neg risk
-            import orjson
             neg_risk = False
             try:
                 meta_rows = await aquery("SELECT meta FROM markets WHERE id = ?", [market_id])

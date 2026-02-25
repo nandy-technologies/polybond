@@ -320,7 +320,7 @@ var _initialLoadDone=false;
       var wOC=d.wallet_usdc_onchain!=null?d.wallet_usdc_onchain:0;
       var wEx=d.wallet_usdc!=null?d.wallet_usdc:0;
       var wPol=d.wallet_pol!=null?d.wallet_pol:0;
-      var totalEquity=wEx+d.invested;
+      var totalEquity=wEx+d.invested+N(d.unrealized_pnl);
       flashIfChanged('kpi-wallet',fmtMoney(totalEquity));
       document.getElementById('kpi-wallet').innerHTML='<span class="bal-val">'+fmtMoney(totalEquity)+'</span>';
       document.getElementById('kpi-wallet-sub').textContent=fmtMoney(wEx)+' cash \u00b7 '+fmtMoney(d.invested)+' invested \u00b7 '+fmtMoney(wOC)+' on-chain \u00b7 '+wPol.toFixed(4)+' POL';
@@ -332,8 +332,6 @@ var _initialLoadDone=false;
       document.getElementById('kpi-pnl-sub').textContent=(rpnl>=0?'+$':'-$')+Math.abs(rpnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' realized \u00b7 '+(upnl>=0?'+$':'-$')+Math.abs(upnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' unrealized';
       document.getElementById('kpi-winrate').textContent=Math.round((d.win_rate||0)*100)+'%';
       document.getElementById('kpi-yield').textContent=((d.annualized_yield||0)*100).toFixed(1)+'%';
-      document.getElementById('kpi-cash').innerHTML='<span class="bal-val">'+fmtMoney(d.cash)+'</span>';
-      document.getElementById('kpi-invested').innerHTML='<span class="bal-val">'+fmtMoney(d.invested)+'</span>';
       document.getElementById('kpi-positions').textContent=d.position_count||0;
       var recEl=document.getElementById('kpi-record');
       recEl.textContent=(d.wins||0)+'W / '+(d.losses||0)+'L';
@@ -342,21 +340,6 @@ var _initialLoadDone=false;
       var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>window.DASHBOARD_CONFIG.haltDrawdownPct?'pnl-negative':ddPct>window.DASHBOARD_CONFIG.drawdownWarnPct?'pnl-warn':'');}
       var _haltPct=window.DASHBOARD_CONFIG.haltDrawdownPct;
       var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct/_haltPct*100)+'%';ddBar.className='drawdown-fill '+(ddPct>_haltPct*0.75?'dd-danger':ddPct>_haltPct*0.25?'dd-warn':'dd-ok');}
-      // Capital utilization (equity = cash + invested + unrealized P&L)
-      var cash_total=N(d.cash);var inv_total=N(d.invested);var upnl_total=N(d.unrealized_pnl);
-      var eq_total=cash_total+inv_total+upnl_total;
-      var capPct=eq_total>0?(inv_total/eq_total*100):0;
-      var capEl=document.getElementById('kpi-cap-util');if(capEl)capEl.textContent=capPct.toFixed(0)+'%';
-      var capBar=document.getElementById('kpi-cap-util-bar');
-      if(capBar){capBar.style.width=Math.min(100,capPct)+'%';capBar.style.background=capPct>80?'var(--red)':capPct>50?'var(--yellow)':'var(--accent)';}
-      // Scan stats with freshness
-      var ss=d.scan_stats||{};
-      var scanEl=document.getElementById('kpi-scan-stats');
-      if(scanEl&&ss.scanned_at){
-        var scanDate=new Date(ss.scanned_at);var scanAge=(Date.now()-scanDate.getTime())/1000;
-        var fCls=scanAge<60?'freshness-fresh':scanAge<300?'freshness-stale':'freshness-dead';
-        scanEl.innerHTML='<span class="freshness-dot '+fCls+'"></span>'+(ss.candidates_found||0)+' / '+(ss.markets_scanned||0)+' mkts \u2014 '+relTime(ss.scanned_at);
-      }
       document.getElementById('header-positions').textContent=(d.position_count||0)+' positions';
       document.getElementById('header-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC)+'</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>'+wPol.toFixed(4)+'<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span>';
       var frEl=document.getElementById('footer-rendered');if(frEl)frEl.textContent='Data as of '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York',hour12:false})+' ET';
@@ -856,8 +839,8 @@ var _initialLoadDone=false;
       html+='<th'+(c.num?' class="num"':'')+(c.key?' data-sort="'+c.key+'"':'')+'>'+c.label+arrow+'</th>';
     });
     html+='</tr></thead><tbody>';
+    function wBar(v){var nv=Math.min(1,Math.abs(N(v)));var w=Math.max(2,Math.round(nv*60));var cls=nv<0.3?'factor-bar factor-bar-dim':nv>=0.7?'factor-bar factor-bar-strong':'factor-bar';return '<span class="factor-track"><span class="'+cls+'" style="width:'+w+'px"></span></span><span class="factor-val">'+nv.toFixed(2)+'</span>';}
     rows.forEach(function(r){
-      function bar(v){var nv=Math.min(1,Math.abs(N(v)));var w=Math.max(2,Math.round(nv*60));var cls=nv<0.3?'factor-bar factor-bar-dim':nv>=0.7?'factor-bar factor-bar-strong':'factor-bar';return '<span class="factor-track"><span class="'+cls+'" style="width:'+w+'px"></span></span><span class="factor-val">'+nv.toFixed(2)+'</span>';}
       var qText=htmlEscape(truncate(r.question,60));
       var qFull=htmlEscape(r.question||'');
       html+='<tr><td title="'+qFull+'"><span class="market-name">'+polyLink(r,qText)+'</span></td>';
@@ -865,7 +848,7 @@ var _initialLoadDone=false;
       html+='<td class="num" style="color:var(--text-muted)">'+N(r.ewma_price).toFixed(3)+'</td>';
       var absZ=Math.abs(N(r.z_score));
       html+='<td class="num '+(absZ>2?'pnl-negative':absZ>1?'pnl-warn':'')+'">'+N(r.z_score).toFixed(2)+'</td>';
-      html+='<td class="num factor-cell">'+bar(r.alert_intensity)+'</td>';
+      html+='<td class="num factor-cell">'+wBar(r.alert_intensity)+'</td>';
       html+='<td class="num">$'+Math.round(N(r.volume)).toLocaleString('en-US')+'</td>';
       html+='<td class="td-muted">'+(r.last_alerted_at?relTime(r.last_alerted_at):'\u2014')+'</td>';
       html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
@@ -984,7 +967,7 @@ var _initialLoadDone=false;
       fetchWithTimeout(apiUrl('/api/bonds/positions/close'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({market_id:marketId,token_id:tokenId})
-      }).then(function(r){return r.json()}).then(function(d){
+      }).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
         if(d.ok){showCopyToast('Exit order placed');loadPositions();loadPendingOrders();}
         else{showCopyToast('Error: '+(d.error||'Unknown'));}
       }).catch(function(e){showCopyToast('Error: '+e.message);}).finally(function(){if(btn)btn.disabled=false;});

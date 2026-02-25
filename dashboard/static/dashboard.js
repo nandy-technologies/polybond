@@ -1128,6 +1128,13 @@ function fetchStrategy(){
     if(el)el.textContent='— equity=$'+d.equity+' → volume_scale=$'+d.volume_scale+', liquidity_scale=$'+d.liquidity_scale;
     el=document.getElementById('strat-kelly');
     if(el)el.textContent='— prior=Beta('+d.eff_alpha+', '+d.eff_beta+'), wins='+d.wins+', losses='+d.losses+', q_mean='+d.q_mean;
+    // Update Kelly effective values everywhere they appear
+    ['sizing','config'].forEach(function(ctx){
+      var a=document.getElementById('kelly-eff-alpha-'+ctx);
+      var b=document.getElementById('kelly-eff-beta-'+ctx);
+      if(a)a.textContent=d.eff_alpha;
+      if(b)b.textContent=d.eff_beta;
+    });
     el=document.getElementById('strat-scan');
     if(el&&d.scan_stats&&d.scan_stats.markets_scanned!=null){
       var s=d.scan_stats;

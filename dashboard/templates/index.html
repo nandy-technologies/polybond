@@ -404,8 +404,8 @@
             <tbody>
               <tr>
                 <td><strong>Kelly</strong></td>
-                <td>Beta({{ bond_kelly_alpha }}+wins, {{ bond_kelly_beta }}+losses)</td>
-                <td class="info-text">Bayesian posterior with drawdown cap and slippage adjustment</td>
+                <td>Beta(<span id="kelly-eff-alpha-sizing">{{ bond_kelly_alpha }}</span>+wins, <span id="kelly-eff-beta-sizing">{{ bond_kelly_beta }}</span>+losses)</td>
+                <td class="info-text">Bayesian posterior with prior decay, drawdown cap, and slippage adjustment</td>
               </tr>
               <tr>
                 <td><strong>Concentration</strong></td>
@@ -476,7 +476,7 @@
             <tbody>
               <tr><td>Enabled</td><td>{{ bond_enabled }}</td></tr>
               <tr class="config-section-header"><td colspan="2">Sizing</td></tr>
-              <tr><td>Kelly Prior</td><td>Beta({{ bond_kelly_alpha }}, {{ bond_kelly_beta }})</td></tr>
+              <tr><td>Kelly Prior</td><td>Beta(<span id="kelly-eff-alpha-config">{{ bond_kelly_alpha }}</span>, <span id="kelly-eff-beta-config">{{ bond_kelly_beta }}</span>) <span class="info-text">effective after decay</span></td></tr>
               <tr><td>Execution Degradation</td><td>{{ "%.0f"|format(bond_exec_degradation * 100) }}%</td></tr>
               <tr><td>Concentration Sigma</td><td>{{ bond_conc_sigma }}</td></tr>
               <tr><td>Diversification Decay</td><td>{{ bond_div_decay }}</td></tr>

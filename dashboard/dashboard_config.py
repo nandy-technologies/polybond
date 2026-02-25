@@ -10,7 +10,7 @@ def get_module_status() -> dict:
     domain_status = "active" if config.DOMAIN_WATCH_ENABLED else "inactive"
     return {
         "bond_scanner": {"name": "Bond Scanner", "status": bond_status, "description": "Resolution timing — buy near-certain outcomes"},
-        "bond_kelly": {"name": "Bond Kelly", "status": bond_status, "description": f"Bayesian Kelly with strong bond prior (Beta {int(config.BOND_KELLY_PRIOR_ALPHA)}/{int(config.BOND_KELLY_PRIOR_BETA)})"},
+        "bond_kelly": {"name": "Bond Kelly", "status": bond_status, "description": "Bayesian Kelly with decaying prior and portfolio-proportional sizing"},
         "domain_watchlist": {"name": "Domain Watchlist", "status": domain_status, "description": "EWMA anomaly detection for crypto/DeFi markets"},
     }
 

@@ -9,3 +9,5 @@ data/*.duckdb.wal
 dist/
 build/
 logs/
+data/backups/
+bot.log

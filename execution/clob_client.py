@@ -1106,6 +1106,9 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
         if hasattr(result, "asks") and result.asks:
             asks = [{"price": float(a.price), "size": float(a.size)} for a in result.asks]
 
+        # Sort BEFORE extracting best bid/ask — CLOB API returns unsorted
+        bids = sorted(bids, key=lambda x: x["price"], reverse=True)[:10]
+        asks = sorted(asks, key=lambda x: x["price"])[:10]
         best_bid = bids[0]["price"] if bids else 0.0
         best_ask = asks[0]["price"] if asks else 0.0
         spread = best_ask - best_bid
@@ -1114,8 +1117,8 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
         return {
             "market_id": getattr(result, "market", "") or "",
             "asset_id": getattr(result, "asset_id", token_id) or token_id,
-            "bids": sorted(bids, key=lambda x: x["price"], reverse=True)[:10],
-            "asks": sorted(asks, key=lambda x: x["price"])[:10],
+            "bids": bids,
+            "asks": asks,
             "best_bid": best_bid,
             "best_ask": best_ask,
             "spread": round(spread, 4),

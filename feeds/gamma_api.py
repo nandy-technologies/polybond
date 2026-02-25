@@ -330,15 +330,15 @@ async def sync_top_markets() -> int:
     -------
     int: number of markets upserted.
     """
-    from datetime import datetime, timezone
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    from datetime import datetime, timedelta, timezone
+    one_year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).strftime("%Y-%m-%d")
     markets: list[dict] = []
     page_size = 100
     offset = 0
     while True:
         page = await fetch_markets(
             limit=page_size, active=True, offset=offset,
-            end_date_min=today,
+            end_date_min=one_year_ago,
             volume_num_min=config.BOND_MIN_VOLUME,
             liquidity_num_min=config.BOND_MIN_LIQUIDITY,
         )

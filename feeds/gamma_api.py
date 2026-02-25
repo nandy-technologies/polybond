@@ -115,22 +115,25 @@ TAG_CATEGORY_MAPPING: dict[str, str] = {
 # Keyword-based fallback when event tags are unavailable (case-insensitive)
 # Order matters: more specific keywords should be checked first
 KEYWORD_CATEGORY_MAPPING: list[tuple[list[str], str]] = [
-    # US Politics keywords (check before Sports to avoid "win the" matching elections)
-    (["trump", "biden", "president", "election", "vote", "congress", "senate",
-      "governor", "mayor"], "US Politics"),
+    # Sports keywords first — "vs." is a strong signal for game matchups
+    (["nba", "nfl", "nhl", " epl ", "premier league", "serie a", "la liga",
+      "champions league", "ncaa", " vs.", " vs ", "world cup", "super bowl",
+      "playoff", "semifinals", "finals"], "Sports"),
+    # Crypto keywords — word-boundary-safe terms only
+    (["bitcoin", "crypto", "ethereum", "blockchain", "solana", "token price",
+      "airdrop", "stablecoin", "defi"], "Crypto"),
     # Geopolitics keywords
-    (["ukraine", "russia", "iran", "israel", "gaza", "war", "strike", "nato",
-      "ceasefire", "peace deal"], "Geopolitics"),
-    # Crypto keywords
-    (["bitcoin", "btc", "ethereum", "eth", "crypto", "token", "blockchain",
-      "solana", "sol"], "Crypto"),
-    # Tech keywords
-    (["ai", "gpt", "openai", "apple", "google", "tesla", "spacex", "robot"], "Tech"),
+    (["ukraine", "russia", "iran", "israel", "gaza", "nato",
+      "ceasefire", "peace deal", "invasion", "missile", "sanctions"], "Geopolitics"),
+    # US Politics keywords
+    (["trump", "biden", "president", "election", "congress", "senate",
+      "governor", "mayor", "supreme court", "impeach"], "US Politics"),
+    # Tech keywords — avoid short words that substring-match
+    (["openai", "gpt-", "chatgpt", "tesla", "spacex", "deepseek",
+      "artificial intelligence", "large language model"], "Tech"),
     # Finance keywords
-    (["fed", "interest rate", "gdp", "inflation", "stock", "ipo", "s&p", "nasdaq"], "Finance"),
-    # Sports keywords (check last since "win the" is generic)
-    (["nba", "nfl", "nhl", "epl", "premier league", "serie a", "la liga",
-      "champions league", "ncaa", "vs.", "win the", "world cup"], "Sports"),
+    (["interest rate", "federal reserve", "inflation", "stock market",
+      "nasdaq", "s&p 500"], "Finance"),
 ]
 
 
@@ -154,21 +157,43 @@ def classify_category(tags: list[str], question: str) -> str:
     if not isinstance(question, str):
         question = ""
     
-    # First pass: check tags against mapping in priority order
-    # We iterate through tags and find the highest-priority match
+    # Priority order: Sports > Crypto > Geopolitics > US Politics > Tech > Finance > Culture > Other
+    # We check ALL tags and pick the highest-priority category found.
+    # This prevents tag ordering from Gamma affecting classification.
+    CATEGORY_PRIORITY = {
+        "Sports": 0, "Crypto": 1, "Geopolitics": 2, "US Politics": 3,
+        "Tech": 4, "Finance": 5, "Culture": 6, "Other": 99,
+    }
+    
+    best_category = None
+    best_priority = 99
+    has_geo_tag = False
+    has_politics_tag = False
+    
     for tag in tags:
         if not isinstance(tag, str):
             continue
-        if tag in TAG_CATEGORY_MAPPING:
-            category = TAG_CATEGORY_MAPPING[tag]
-            # Special handling for "Politics" tag: only use if no geo-specific tags present
-            if tag == "Politics":
-                # Check if there are any geo-specific tags that would override
-                geo_tags = {"Ukraine", "Israel", "China", "russia", "Iran", "Gaza", "Syria",
-                           "Turkey", "France", "Germany", "uk", "brazil", "taiwan", "india"}
-                if any(t in geo_tags for t in tags):
-                    continue  # Skip generic "Politics" if geo tags exist
-            return category
+        cat = TAG_CATEGORY_MAPPING.get(tag)
+        if cat is None:
+            continue
+        if tag == "Politics":
+            has_politics_tag = True
+            continue  # Defer — only use if no geo tags found
+        pri = CATEGORY_PRIORITY.get(cat, 99)
+        if cat == "Geopolitics":
+            has_geo_tag = True
+        if pri < best_priority:
+            best_priority = pri
+            best_category = cat
+    
+    # Generic "Politics" tag: becomes US Politics only if no geo-specific tag found
+    if has_politics_tag and best_category is None:
+        best_category = "US Politics"
+    elif has_politics_tag and not has_geo_tag and best_priority > CATEGORY_PRIORITY["US Politics"]:
+        best_category = "US Politics"
+    
+    if best_category:
+        return best_category
     
     # Second pass: keyword fallback on question text
     if question:
@@ -376,7 +401,7 @@ async def _fetch_event_tags(event_slugs: list[str]) -> dict[str, list[str]]:
     
     for page_num in range(max_pages):
         url = f"{config.GAMMA_API_BASE}/events"
-        params = {"limit": str(page_size), "offset": str(offset)}
+        params = {"limit": str(page_size), "offset": str(offset), "active": "true", "closed": "false"}
         
         data = await _get_json(url, params=params)
         if not data:

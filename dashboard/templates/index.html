@@ -138,8 +138,8 @@
         </div>
         <div class="kpi-summary-row" id="kpi-summary-row">
           <div class="stat-card">
-            <div class="value" id="kpi-avg-yield">&mdash;</div>
-            <div class="label">Avg Yield</div>
+            <div class="value" id="kpi-realized-yield">{{ "%.1f"|format(overview.realized_yield * 100) }}%</div>
+            <div class="label" title="Cost-basis-weighted annualized yield on resolved positions, based on actual hold time">Realized Yield</div>
           </div>
           <div class="stat-card">
             <div class="value" id="kpi-avg-days">&mdash;</div>

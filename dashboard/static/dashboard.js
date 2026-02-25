@@ -349,6 +349,8 @@ var _initialLoadDone=false;
       document.getElementById('kpi-pnl-sub').textContent=(rpnl>=0?'+$':'-$')+Math.abs(rpnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' realized \u00b7 '+(upnl>=0?'+$':'-$')+Math.abs(upnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' unrealized';
       document.getElementById('kpi-winrate').textContent=Math.round((d.win_rate||0)*100)+'%';
       document.getElementById('kpi-yield').textContent=((d.annualized_yield||0)*100).toFixed(1)+'%';
+      var ryEl=document.getElementById('kpi-realized-yield');
+      if(ryEl)ryEl.textContent=((d.realized_yield||0)*100).toFixed(1)+'%';
       document.getElementById('kpi-positions').textContent=d.position_count||0;
       var recEl=document.getElementById('kpi-record');
       recEl.textContent=(d.wins||0)+'W / '+(d.losses||0)+'L';
@@ -465,21 +467,15 @@ var _initialLoadDone=false;
       _posData.forEach(function(r){r._age_hours=posAge(r.opened_at).hours;});
       sortData(_posData,_posSortKey,_posSortAsc);
       renderPositions(_posData);
-      // Update avg yield/days from positions (cash/invested updated from KPI refresh)
-      var ayEl=document.getElementById('kpi-avg-yield');
+      // Update avg days from positions
       var adEl=document.getElementById('kpi-avg-days');
       if(_posData.length>0){
-        var weightedYield=0,totalCost=0,totalDays=0,countDays=0;
+        var totalDays=0,countDays=0;
         _posData.forEach(function(r){
-          var cb=N(r.cost_basis);
-          weightedYield+=N(r.annualized_yield)*cb;
-          totalCost+=cb;
           if(r.end_date){var d=new Date(r.end_date);if(!isNaN(d.getTime())){var dl=Math.max(0,(d-Date.now())/86400000);totalDays+=dl;countDays++;}}
         });
-        if(ayEl)ayEl.textContent=(totalCost>0?(weightedYield/totalCost*100):0).toFixed(1)+'%';
         if(adEl)adEl.textContent=countDays>0?(totalDays/countDays).toFixed(0)+'d':'\u2014';
       } else {
-        if(ayEl)ayEl.textContent='\u2014';
         if(adEl)adEl.textContent='\u2014';
       }
     }).catch(function(){

@@ -101,16 +101,30 @@ async def _get_overview() -> dict:
                 "  COALESCE(SUM(size) FILTER (WHERE side = 'buy' AND status = 'filled'), 0) "
                 "FROM bond_orders WHERE created_at >= current_timestamp - INTERVAL '24 hours'")
 
-        state, wallet_usdc, onchain, realized_rows, yield_rows, daily_rows = await asyncio.gather(
+        async def _realized_yield_query():
+            # Compute cost-basis-weighted realized annualized yield across all closed positions
+            # yield per position = (realized_pnl / cost_basis) * (365 / hold_days)
+            return await aquery(
+                "SELECT COALESCE(SUM(CASE WHEN cost_basis > 0 AND closed_at > opened_at "
+                "  THEN (realized_pnl / cost_basis) * (365.0 / GREATEST(EPOCH(closed_at - opened_at) / 86400.0, 0.01)) * cost_basis "
+                "  ELSE 0 END), 0), "
+                "COALESCE(SUM(CASE WHEN cost_basis > 0 AND closed_at > opened_at THEN cost_basis ELSE 0 END), 0) "
+                "FROM bond_positions WHERE status IN ('resolved_win', 'resolved_loss', 'exited')")
+
+        state, wallet_usdc, onchain, realized_rows, yield_rows, daily_rows, realized_yield_rows = await asyncio.gather(
             get_bond_portfolio_state(),
             _safe_usdc(),
             _safe_onchain(),
             _realized_query(),
             _yield_query(),
             _daily_orders_query(),
+            _realized_yield_query(),
         )
 
         realized_pnl = realized_rows[0][0] if realized_rows else 0.0
+        realized_yield_weighted = realized_yield_rows[0][0] if realized_yield_rows else 0.0
+        realized_yield_basis = realized_yield_rows[0][1] if realized_yield_rows else 0.0
+        realized_yield = realized_yield_weighted / realized_yield_basis if realized_yield_basis > 0 else 0.0
 
         total_resolved = _bond_wins + _bond_losses
         win_rate = _bond_wins / total_resolved if total_resolved > 0 else 0.0
@@ -133,6 +147,7 @@ async def _get_overview() -> dict:
             "losses": _bond_losses,
             "win_rate": round(win_rate, 4),
             "annualized_yield": round(weighted_yield, 4),
+            "realized_yield": round(realized_yield, 4),
             "portfolio_kelly": round(portfolio_kelly, 4),
             "wallet_pol": onchain["pol"],
             "wallet_usdc_onchain": onchain["usdc_onchain"],

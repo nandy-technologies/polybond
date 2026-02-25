@@ -84,8 +84,8 @@ BOND_SEED_CAPITAL: float = float(os.getenv("BOND_SEED_CAPITAL", "300"))
 if BOND_SEED_CAPITAL <= 0:
     raise ValueError(f"BOND_SEED_CAPITAL must be positive, got {BOND_SEED_CAPITAL}")
 BOND_SCAN_INTERVAL: int = int(os.getenv("BOND_SCAN_INTERVAL", "60"))
-BOND_MIN_VOLUME: float = float(os.getenv("BOND_MIN_VOLUME", "250000"))
-BOND_MIN_LIQUIDITY: float = float(os.getenv("BOND_MIN_LIQUIDITY", "1000"))
+BOND_MIN_VOLUME: float = float(os.getenv("BOND_MIN_VOLUME", "50000"))
+BOND_MIN_LIQUIDITY: float = float(os.getenv("BOND_MIN_LIQUIDITY", "500"))
 
 BOND_LIQUIDITY_SCALE: float = float(os.getenv("BOND_LIQUIDITY_SCALE", "5000"))
 BOND_TIME_TAU: float = float(os.getenv("BOND_TIME_TAU", "14.0"))
@@ -112,7 +112,7 @@ BOND_HALT_DRAWDOWN_PCT: float = float(os.getenv("BOND_HALT_DRAWDOWN_PCT", "0.20"
 BOND_HALT_MIN_EQUITY: float = float(os.getenv("BOND_HALT_MIN_EQUITY", "50.0"))  # Don't trip circuit breaker below this equity
 BOND_ALERT_WINDOW: int = int(os.getenv("BOND_ALERT_WINDOW", "10"))
 BOND_ALERT_MIN_WINRATE: float = float(os.getenv("BOND_ALERT_MIN_WINRATE", "0.70"))
-BOND_MAX_REST_FETCHES: int = int(os.getenv("BOND_MAX_REST_FETCHES", "20"))
+BOND_MAX_REST_FETCHES: int = int(os.getenv("BOND_MAX_REST_FETCHES", "40"))
 BOND_MAX_CATEGORY_PCT: float = float(os.getenv("BOND_MAX_CATEGORY_PCT", "0.40"))
 BOND_MAX_DAILY_ORDERS: int = int(os.getenv("BOND_MAX_DAILY_ORDERS", "20"))
 BOND_MAX_DAILY_CAPITAL_PCT: float = float(os.getenv("BOND_MAX_DAILY_CAPITAL_PCT", "0.80"))

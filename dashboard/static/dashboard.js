@@ -247,13 +247,13 @@ var _initialLoadDone=false;
       var labels=data.map(function(d){return d.ts;});
       var values=data.map(function(d){return d.equity;});
       var cashValues=data.map(function(d){return d.cash;});
-      var investedValues=data.map(function(d){return d.invested;});
+      // Invested line removed — equity already includes it
       var yieldValues=data.map(function(d){return d['yield']||0;});
       if(equityChart){
         equityChart.data.labels=labels;
         equityChart.data.datasets[0].data=values;
         equityChart.data.datasets[1].data=cashValues;
-        equityChart.data.datasets[2].data=investedValues;
+        // dataset[2] (Invested) removed
         equityChart.update('none');
       }else{
         var ctx=document.getElementById('equity-chart').getContext('2d');
@@ -268,7 +268,7 @@ var _initialLoadDone=false;
           data:{labels:labels,datasets:[
             {label:'Equity',data:values,borderColor:_ac,backgroundColor:chartGradient,fill:true,tension:0.3,pointRadius:0,borderWidth:2},
             {label:'Cash',data:cashValues,borderColor:'rgba(100,180,100,0.6)',borderDash:[5,3],fill:false,tension:0.3,pointRadius:0,borderWidth:1.5},
-            {label:'Invested',data:investedValues,borderColor:'rgba(100,150,255,0.6)',borderDash:[5,3],fill:false,tension:0.3,pointRadius:0,borderWidth:1.5}
+            // Invested dataset removed
           ]},
           options:{responsive:true,maintainAspectRatio:false,animation:false,
             plugins:{legend:{display:true,labels:{color:'#888',font:{family:'DM Sans',size:11},usePointStyle:true,pointStyle:'line'}},tooltip:{mode:'index',intersect:false,backgroundColor:'#141414',titleColor:'#e0e0e0',bodyColor:'#e0e0e0',borderColor:'#222',borderWidth:1,callbacks:{label:function(ctx){if(document.body.classList.contains('bal-hidden'))return ctx.dataset.label+': ***';return ctx.dataset.label+': $'+Number(ctx.parsed.y).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}}}},

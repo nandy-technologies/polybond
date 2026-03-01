@@ -650,7 +650,7 @@
       font-family: var(--heading); font-weight: 400; color: var(--text-bright);
       font-size: 1.1rem; margin-bottom: 0.75rem;
     }
-    .confirm-modal p { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.6; }
+    .confirm-modal p { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.6; white-space: pre-line; }
     .confirm-modal .btn-row { display: flex; gap: 12px; justify-content: center; }
     .confirm-modal button {
       padding: 0.5rem 1.5rem; border-radius: 6px; font-family: var(--font);
@@ -786,7 +786,6 @@
       .kpi-hero-row { grid-template-columns: 1fr; }
       .kpi-summary-row { grid-template-columns: repeat(2, 1fr); padding: 0.5rem; }
       .kpi-secondary-row .stat-card .value { font-size: 0.95rem; }
-      .chart-container { height: 260px; }
       .pos-detail-grid { grid-template-columns: 1fr; }
       .panel { padding: 0.875rem; }
       .panel h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }

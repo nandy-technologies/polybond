@@ -237,6 +237,7 @@ ALERT_CACHE_MAX_SIZE: int = int(os.getenv("ALERT_CACHE_MAX_SIZE", "1000"))
 # -- Backup ---------------------------------------------------------------------
 BACKUP_MAX_COUNT: int = int(os.getenv("BACKUP_MAX_COUNT", "12"))
 BACKUP_INTERVAL_SECS: int = int(os.getenv("BACKUP_INTERVAL_SECS", "1800"))
+ALLOW_DB_NUKE: bool = os.getenv("ALLOW_DB_NUKE", "").lower() in ("1", "true", "yes")
 
 # -- Database -------------------------------------------------------------------
 DB_QUERY_TIMEOUT: float = float(os.getenv("DB_QUERY_TIMEOUT", "10.0"))

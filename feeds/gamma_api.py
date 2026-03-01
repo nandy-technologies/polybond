@@ -229,13 +229,9 @@ class _TokenBucket:
                 self._tokens + (elapsed / self._period) * self._rate,
             )
             self._last_refill = now
-
-            if self._tokens < 1.0:
-                wait = (1.0 - self._tokens) * self._period / self._rate
-                self._tokens = 0.0
-                self._last_refill = now
-            else:
-                self._tokens -= 1.0
+            self._tokens -= 1.0  # Always consume; can go negative to stagger callers
+            if self._tokens < 0:
+                wait = (-self._tokens) * self._period / self._rate
 
         # Sleep outside the lock so other callers aren't serialized
         if wait > 0:
@@ -289,12 +285,17 @@ async def _get_json(
         try:
             async with session.get(url, params=params) as resp:
                 if resp.status == 429:
-                    retry_after = float(resp.headers.get("Retry-After", "2"))
+                    try:
+                        retry_after = float(resp.headers.get("Retry-After", "2"))
+                    except (ValueError, TypeError):
+                        retry_after = 2.0
+                    last_exc = Exception(f"429 rate limited (Retry-After: {retry_after})")
                     log.warning("rate_limited", url=url, retry_after=retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 if resp.status >= 500:
+                    last_exc = Exception(f"Server error {resp.status}")
                     log.warning("server_error", url=url, status=resp.status, attempt=attempt)
                     await asyncio.sleep(config.GAMMA_API_BACKOFF_BASE * attempt)
                     continue
@@ -346,6 +347,12 @@ def _normalise_market(raw: dict) -> dict:
     events = raw.get("events") or []
     event_slug = events[0].get("slug", "") if events else ""
     event_title = events[0].get("title", "") if events else ""
+
+    # Prefer event-level endDate when it's later (market-level can be stale)
+    if events:
+        event_end = _parse_timestamp(events[0].get("endDate"))
+        if event_end and (end_date is None or event_end > end_date):
+            end_date = event_end
 
     return {
         "id": raw.get("id", raw.get("conditionId", "")),
@@ -548,12 +555,10 @@ async def fetch_all_markets(
     for result in results:
         if isinstance(result, Exception):
             log.warning("fetch_all_markets_page_error", error=str(result))
-            break
+            continue
         if not result:
-            break
+            continue  # Empty page (possible transient error) — don't drop subsequent pages
         all_markets.extend(result)
-        if len(result) < page_size:
-            break  # Incomplete page = end of results
 
     log.info("fetch_all_markets_complete", total=len(all_markets))
     return all_markets
@@ -690,19 +695,23 @@ async def sync_top_markets() -> int:
             except (duckdb.FatalException, duckdb.InternalException, duckdb.IOException):
                 _mark_conn_error()
                 raise
-            except Exception:
-                # Fallback: insert one at a time to skip bad rows
-                upserted = 0
-                for params in batch:
-                    try:
-                        conn.execute(sql, params)
-                        upserted += 1
-                    except (duckdb.FatalException, duckdb.InternalException, duckdb.IOException):
-                        _mark_conn_error()
-                        raise
-                    except Exception as exc:
-                        log.debug("upsert_skip", error=str(exc))
-                return upserted
+            except Exception as exc:
+                log.warning("batch_upsert_fallback", error=str(exc), batch_size=len(batch))
+
+        # Fallback: per-row with lock release between rows to avoid starving other DB ops
+        upserted = 0
+        for params in batch:
+            try:
+                with _db_lock:
+                    conn = get_conn()
+                    conn.execute(sql, params)
+                    upserted += 1
+            except (duckdb.FatalException, duckdb.InternalException, duckdb.IOException):
+                _mark_conn_error()
+                raise
+            except Exception as exc:
+                log.debug("upsert_skip", error=str(exc))
+        return upserted
 
     upserted = await asyncio.to_thread(_batch_upsert, _upsert_sql, params_list)
 
@@ -752,17 +761,17 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
         try:
             rows = await asyncio.to_thread(
                 query,
-                "SELECT id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta, category "
+                "SELECT id, condition_id, question, slug, event_slug, event_title, active, volume, liquidity, end_date, outcome, resolved_at, meta, category, neg_risk "
                 "FROM markets WHERE id = ?",
                 [market_id],
             )
             if rows:
                 row = rows[0]
                 # Convert DuckDB datetime objects to Python datetime for orjson serialization
-                _end_date = row[8]
+                _end_date = row[9]
                 if _end_date is not None and not isinstance(_end_date, str):
                     _end_date = _end_date.isoformat() if hasattr(_end_date, 'isoformat') else str(_end_date)
-                _resolved_at = row[10]
+                _resolved_at = row[11]
                 if _resolved_at is not None and not isinstance(_resolved_at, str):
                     _resolved_at = _resolved_at.isoformat() if hasattr(_resolved_at, 'isoformat') else str(_resolved_at)
                 market = {
@@ -771,14 +780,16 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                     "question": row[2],
                     "slug": row[3],
                     "event_slug": row[4],
-                    "active": row[5],
-                    "volume": row[6],
-                    "liquidity": row[7],
+                    "event_title": row[5],
+                    "active": row[6],
+                    "volume": row[7],
+                    "liquidity": row[8],
                     "end_date": _end_date,
-                    "outcome": row[9],
+                    "outcome": row[10],
                     "resolved_at": _resolved_at,
-                    "meta": row[11],
-                    "category": row[12],
+                    "meta": row[12],
+                    "category": row[13],
+                    "neg_risk": bool(row[14]) if row[14] is not None else False,
                 }
                 # Refresh Redis cache with DB data
                 try:
@@ -824,11 +835,13 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
         await asyncio.to_thread(
             execute,
             """
-            INSERT INTO markets (id, condition_id, question, slug, event_slug, active, volume, liquidity, end_date, outcome, resolved_at, meta, category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO markets (id, condition_id, question, slug, event_slug, event_title, active, volume, liquidity, end_date, outcome, resolved_at, meta, category, neg_risk)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 question    = EXCLUDED.question,
+                slug        = EXCLUDED.slug,
                 event_slug  = EXCLUDED.event_slug,
+                event_title = EXCLUDED.event_title,
                 active      = EXCLUDED.active,
                 volume      = EXCLUDED.volume,
                 liquidity   = EXCLUDED.liquidity,
@@ -836,7 +849,8 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                 outcome     = EXCLUDED.outcome,
                 resolved_at = EXCLUDED.resolved_at,
                 meta        = EXCLUDED.meta,
-                category    = EXCLUDED.category
+                category    = EXCLUDED.category,
+                neg_risk    = EXCLUDED.neg_risk
             """,
             [
                 market["id"],
@@ -844,6 +858,7 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                 market["question"],
                 market["slug"],
                 market.get("event_slug", ""),
+                market.get("event_title", ""),
                 market["active"],
                 market["volume"],
                 market["liquidity"],
@@ -852,6 +867,7 @@ async def get_market(market_id: str, force_refresh: bool = False) -> dict | None
                 market["resolved_at"].isoformat() if market["resolved_at"] else None,
                 market["meta"],
                 category,
+                market.get("neg_risk", False),
             ],
         )
     except Exception as exc:
@@ -907,6 +923,12 @@ async def sync_position_markets() -> int:
                 refreshed += 1
         except Exception as exc:
             log.debug("sync_position_market_failed", market_id=log_id(market_id), error=str(exc))
+
+    # Prune cache entries for positions no longer active
+    active_ids = {mid for (mid,) in pos_rows}
+    stale_keys = set(_position_market_sync_cache) - active_ids
+    for k in stale_keys:
+        del _position_market_sync_cache[k]
 
     if refreshed or skipped:
         log.info("position_markets_synced", refreshed=refreshed, skipped=skipped, total=len(pos_rows))

@@ -24,7 +24,7 @@ def dynamic_max_order_pct(equity: float) -> float:
       $5000 → 10.0%
       $50K  → 5.6%
     """
-    from . import config
+    import config
     floor = config.BOND_MAX_ORDER_FLOOR
     ceiling = config.BOND_MAX_ORDER_CEILING
     midpoint = config.BOND_MAX_ORDER_MIDPOINT
@@ -65,6 +65,7 @@ _rolling_losses: int | None = None
 
 # Track peak equity for circuit breaker
 _peak_equity: float = 0.0
+_circuit_breaker_active: bool = False
 
 # Measured execution degradation from actual fills (None = use config default)
 _measured_exec_degradation: float | None = None
@@ -107,13 +108,19 @@ async def reload_bond_stats() -> None:
                 wins = cnt
             elif status == "resolved_loss":
                 losses = cnt
-        # Also count stop-loss exits (sold at a loss) for Bayesian prior
+        # Count profitable exits as wins, unprofitable exits as losses
         try:
             exit_rows = await aquery(
-                "SELECT COUNT(*) FROM bond_positions WHERE status = 'exited' AND COALESCE(realized_pnl, 0) < 0"
+                "SELECT "
+                "  SUM(CASE WHEN COALESCE(realized_pnl, 0) >= 0 THEN 1 ELSE 0 END), "
+                "  SUM(CASE WHEN COALESCE(realized_pnl, 0) < 0 THEN 1 ELSE 0 END) "
+                "FROM bond_positions WHERE status = 'exited'"
             )
-            if exit_rows and exit_rows[0][0]:
-                losses += exit_rows[0][0]
+            if exit_rows and exit_rows[0]:
+                if exit_rows[0][0]:
+                    wins += exit_rows[0][0]
+                if exit_rows[0][1]:
+                    losses += exit_rows[0][1]
         except Exception:
             pass
         _bond_wins = wins
@@ -121,6 +128,9 @@ async def reload_bond_stats() -> None:
         log.info("bond_stats_reloaded", wins=wins, losses=losses)
     except Exception as exc:
         log.warning("bond_stats_load_failed", error=str(exc))
+
+    # Refresh measured execution degradation from actual fills
+    await _refresh_measured_exec_degradation()
 
 
 async def _refresh_rolling_kelly_stats() -> None:
@@ -138,7 +148,7 @@ async def _refresh_rolling_kelly_stats() -> None:
             [config.BOND_KELLY_ROLLING_WINDOW],
         )
         if rows and len(rows) >= 10:
-            wins = sum(1 for (s, pnl) in rows if s == "resolved_win")
+            wins = sum(1 for (s, pnl) in rows if s == "resolved_win" or (s == "exited" and pnl >= 0))
             losses = sum(1 for (s, pnl) in rows if s == "resolved_loss" or (s == "exited" and pnl < 0))
             _rolling_wins = wins
             _rolling_losses = losses
@@ -246,17 +256,19 @@ def compute_bond_size(
     q_mean = alpha / (alpha + beta_)  # posterior mean win probability
 
     # Edge after execution degradation AND fees
+    # Use measured degradation from actual fills when available, else config default
+    exec_deg = _measured_exec_degradation if _measured_exec_degradation is not None else config.BOND_EXECUTION_DEGRADATION
     # Polymarket fee: fee_rate * min(price, 1-price) per share
     fee_rate = fee_rate_bps / 10000.0
     fee_cost = fee_rate * min(price, 1.0 - price)
-    edge = (q_mean - price) * (1.0 - config.BOND_EXECUTION_DEGRADATION) - fee_cost
+    edge = (q_mean - price) * (1.0 - exec_deg) - fee_cost
 
     if edge <= 0:
         log.debug("bond_negative_edge", price=f"{price:.3f}", q_mean=f"{q_mean:.4f}", edge=f"{edge:.4f}")
         return 0.0
 
     # Adjust price for execution costs (fees, slippage, timing)
-    p_adj = price + config.BOND_EXECUTION_DEGRADATION * (1.0 - price)
+    p_adj = price + exec_deg * (1.0 - price)
 
     # Drawdown-constrained Kelly (reuse existing module)
     kelly = _drawdown_capped_kelly(
@@ -446,7 +458,13 @@ async def scan_bond_candidates() -> list[dict]:
                         if current_ts <= cached.ws_cache_ts:
                             _negative_cache_hits += 1
                             continue
-                    del _negative_cache[cache_key]
+                        del _negative_cache[cache_key]  # New WS data, re-evaluate
+                    else:
+                        # No WS data — honor time-based expiry
+                        if (time.monotonic() - cached.last_scan_ts) < config.BOND_NEGATIVE_CACHE_MAX_AGE:
+                            _negative_cache_hits += 1
+                            continue
+                        del _negative_cache[cache_key]
 
                 # Stale WS cache price pre-filter
                 stale_ob = get_ws_orderbook(token_id, max_age=0)
@@ -710,7 +728,7 @@ async def _query_rolling_limits() -> tuple[int, float]:
 
 async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
     """Inner implementation — always called under _execute_lock."""
-    global _peak_equity
+    global _peak_equity, _circuit_breaker_active
     portfolio = await get_bond_portfolio_state()
 
     # Rolling 24h limits — no midnight cliff, budget frees up as orders age out
@@ -750,10 +768,11 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             )
         except Exception:
             pass
-    elif equity > _peak_equity * config.BOND_HALT_RECOVERY_PCT and equity < _peak_equity:
+    elif _circuit_breaker_active and equity > _peak_equity * config.BOND_HALT_RECOVERY_PCT and equity < _peak_equity:
         # Recovery: equity is above recovery threshold but below old peak.
         # Reset peak to current equity so the drawdown breaker uses the
         # recovered level as baseline, allowing trading to resume.
+        _circuit_breaker_active = False
         old_peak = _peak_equity
         _peak_equity = equity
         try:
@@ -770,6 +789,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             pass
         
     if _peak_equity > config.BOND_HALT_MIN_EQUITY and equity < _peak_equity * (1.0 - config.BOND_HALT_DRAWDOWN_PCT):
+        _circuit_breaker_active = True
         log.warning(
             "bond_circuit_breaker_triggered",
             equity=f"{equity:.2f}",
@@ -789,10 +809,12 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
 
     orders_placed = 0
     executed_markets = set()
+    executed_events = set()
 
     # Check for existing open positions — track add count for averaging
     existing_positions = set()
     position_order_count: dict[tuple[str, str], int] = {}
+    pos_rows: list = []
     try:
         pos_rows = await aquery(
             "SELECT market_id, token_id FROM bond_positions WHERE status IN ('open', 'exiting')"
@@ -821,15 +843,19 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
 
     # Check for pending/open orders
     pending_orders = set()
+    order_rows: list = []
     try:
         order_rows = await aquery(
             "SELECT market_id, token_id FROM bond_orders "
             "WHERE status IN ('pending', 'open') "
-            "OR (side = 'buy' AND created_at >= current_timestamp - INTERVAL '30 minutes')"
+            "OR (side = 'buy' AND status = 'cancelled' AND created_at >= current_timestamp - INTERVAL '30 minutes')"
         )
         pending_orders = {(r[0], r[1]) for r in order_rows}
     except Exception:
         pass
+
+    # Market-level dedup: markets with open positions or pending orders
+    held_markets = {r[0] for r in pos_rows} | {r[0] for r in order_rows}
 
     # Category exposure tracking for correlation risk
     category_exposure: dict[str, float] = {}
@@ -853,7 +879,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
     try:
         # Count both open positions AND pending/open buy orders as event exposure
         evt_rows = await aquery(
-            "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), bp.cost_basis "
+            "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), COALESCE(bp.cost_basis, 0) "
             "FROM bond_positions bp JOIN markets m ON bp.market_id = m.id "
             "WHERE bp.status IN ('open', 'exiting')"
         )
@@ -861,7 +887,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             event_exposure[evt or "unknown"] = event_exposure.get(evt or "unknown", 0.0) + cost_basis
         # Include pending/open buy orders (not yet positions but capital is committed)
         pending_evt_rows = await aquery(
-            "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), bo.size "
+            "SELECT COALESCE(NULLIF(m.event_slug, ''), m.id), COALESCE(bo.size, 0) "
             "FROM bond_orders bo JOIN markets m ON bo.market_id = m.id "
             "WHERE bo.status IN ('pending', 'open') AND bo.side = 'buy'"
         )
@@ -869,6 +895,10 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             event_exposure[evt or "unknown"] = event_exposure.get(evt or "unknown", 0.0) + size
     except Exception:
         pass
+
+    # Event-level dedup: events with open positions or pending orders
+    held_events = set(event_exposure.keys())
+    held_events.discard("unknown")
 
     # Fetch last FILLED order time per (market_id, token_id) for cooldown
     order_cooldowns: dict[tuple[str, str], float] = {}
@@ -920,6 +950,13 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         if (market_id, token_id) in pending_orders:
             continue
         if market_id in executed_markets:
+            continue
+        # Hard block: already hold a different token in this market (opposite side)
+        if market_id in held_markets and (market_id, token_id) not in existing_positions:
+            continue
+        # Hard block: already hold a position in another market of this event
+        candidate_event = candidate.get("event_slug", "") or candidate.get("market_id", "")
+        if candidate_event in (held_events | executed_events) and (market_id, token_id) not in existing_positions:
             continue
         eligible.append(candidate)
 
@@ -1113,13 +1150,17 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             "tick_size_str": tick_size_str,
             "shares": size_usd / order_price if order_price > 0 else 0,
             "is_taker": is_taker,
+            "_category": candidate_category,
+            "_event": candidate_event,
         })
 
         # Update portfolio state for next candidate (optimistic)
         portfolio["cash"] -= size_usd
         portfolio["total_invested"] += size_usd
-        portfolio["n_positions"] += 1
+        if (market_id, token_id) not in existing_positions:
+            portfolio["n_positions"] += 1
         executed_markets.add(market_id)
+        executed_events.add(candidate_event)
         category_exposure[candidate_category] = category_exposure.get(candidate_category, 0.0) + size_usd
         event_exposure[candidate_event] = event_exposure.get(candidate_event, 0.0) + size_usd
 
@@ -1157,9 +1198,16 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             try:
                 from execution.clob_client import get_open_orders
                 exchange_orders = await get_open_orders()
+                # Exclude orders already tracked in DB to avoid duplicates
+                known_clob_ids: set[str] = set()
+                try:
+                    _known_rows = await aquery("SELECT clob_order_id FROM bond_orders WHERE status IN ('pending', 'open')")
+                    known_clob_ids = {r[0] for r in _known_rows if r[0]}
+                except Exception:
+                    pass
                 placed_token_prices = {
                     (o.get("asset_id"), round(float(o.get("price", 0)), 4)): o.get("id")
-                    for o in exchange_orders if o.get("id")
+                    for o in exchange_orders if o.get("id") and o.get("id") not in known_clob_ids
                 }
                 partial_results: dict[int, dict] = {}
                 for i, entry in enumerate(batch_entries):
@@ -1207,7 +1255,17 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
                             raw=str(order_result)[:200])
                 portfolio["cash"] += size_usd
                 portfolio["total_invested"] -= size_usd
-                portfolio["n_positions"] -= 1
+                if (market_id, token_id) not in existing_positions:
+                    portfolio["n_positions"] -= 1
+                # Rollback exposure tracking for failed order
+                cat_key = entry.get("_category")
+                evt_key = entry.get("_event")
+                if cat_key and cat_key in category_exposure:
+                    category_exposure[cat_key] = max(0, category_exposure[cat_key] - size_usd)
+                if evt_key and evt_key in event_exposure:
+                    event_exposure[evt_key] = max(0, event_exposure[evt_key] - size_usd)
+                executed_markets.discard(market_id)
+                executed_events.discard(evt_key)
                 continue
 
             # Record order in DB
@@ -1255,6 +1313,15 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
                 from execution.clob_client import get_open_orders
                 open_orders = await get_open_orders(asset_id=token_id)
                 known_ids = set(placed_order_ids)
+                # Also exclude orders already tracked in DB
+                try:
+                    _db_rows = await aquery(
+                        "SELECT clob_order_id FROM bond_orders WHERE token_id = ? AND status IN ('pending', 'open')",
+                        [token_id],
+                    )
+                    known_ids.update(r[0] for r in _db_rows if r[0])
+                except Exception:
+                    pass
                 for oo in open_orders:
                     oo_id = oo.get("id", "")
                     if oo_id and oo_id not in known_ids:
@@ -1276,18 +1343,45 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
                     # No orphan found — order didn't make it
                     portfolio["cash"] += size_usd
                     portfolio["total_invested"] -= size_usd
-                    portfolio["n_positions"] -= 1
+                    if (market_id, token_id) not in existing_positions:
+                        portfolio["n_positions"] -= 1
+                    cat_key = entry.get("_category")
+                    evt_key = entry.get("_event")
+                    if cat_key and cat_key in category_exposure:
+                        category_exposure[cat_key] = max(0, category_exposure[cat_key] - size_usd)
+                    if evt_key and evt_key in event_exposure:
+                        event_exposure[evt_key] = max(0, event_exposure[evt_key] - size_usd)
+                    executed_markets.discard(market_id)
+                    executed_events.discard(evt_key)
             except Exception:
                 # Best-effort recovery failed — rollback
                 portfolio["cash"] += size_usd
                 portfolio["total_invested"] -= size_usd
-                portfolio["n_positions"] -= 1
+                if (market_id, token_id) not in existing_positions:
+                    portfolio["n_positions"] -= 1
+                cat_key = entry.get("_category")
+                evt_key = entry.get("_event")
+                if cat_key and cat_key in category_exposure:
+                    category_exposure[cat_key] = max(0, category_exposure[cat_key] - size_usd)
+                if evt_key and evt_key in event_exposure:
+                    event_exposure[evt_key] = max(0, event_exposure[evt_key] - size_usd)
+                executed_markets.discard(market_id)
+                executed_events.discard(evt_key)
 
         except Exception as exc:
             log.error("bond_order_failed", market_id=log_id(market_id), error=str(exc))
             portfolio["cash"] += size_usd
             portfolio["total_invested"] -= size_usd
-            portfolio["n_positions"] -= 1
+            if (market_id, token_id) not in existing_positions:
+                portfolio["n_positions"] -= 1
+            cat_key = entry.get("_category")
+            evt_key = entry.get("_event")
+            if cat_key and cat_key in category_exposure:
+                category_exposure[cat_key] = max(0, category_exposure[cat_key] - size_usd)
+            if evt_key and evt_key in event_exposure:
+                event_exposure[evt_key] = max(0, event_exposure[evt_key] - size_usd)
+            executed_markets.discard(market_id)
+            executed_events.discard(evt_key)
 
     # Phase 4: Check maker rebate scoring (informational)
     if placed_order_ids:

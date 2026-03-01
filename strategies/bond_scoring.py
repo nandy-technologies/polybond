@@ -10,6 +10,9 @@ from __future__ import annotations
 import math
 
 import config
+from utils.logger import get_logger
+
+log = get_logger("bond_scoring")
 
 
 def opportunity_score(
@@ -41,13 +44,8 @@ def opportunity_score(
 
     # Defense-in-depth: if spread > 20% of ask, market is too illiquid to trust
     if price > 0 and spread / price > 0.20:
-        import structlog
-        structlog.get_logger().warning(
-            "spread_sanity_reject",
-            spread=spread,
-            price=price,
-            spread_pct=round(spread / price * 100, 1),
-        )
+        log.debug("spread_sanity_reject", spread=spread, price=price,
+                  spread_pct=round(spread / price * 100, 1))
         se = 0.0
 
     # Weighted geometric mean: product(factor_i ^ weight_i) ^ (1 / sum_weights)

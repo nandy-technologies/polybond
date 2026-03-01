@@ -172,7 +172,7 @@ def _parse_orderbook(raw: dict) -> dict | None:
                 entry = {
                     "market_id": market_id,
                     "asset_id": asset_id,
-                    "bids": [{"price": best_bid, "size": float(pc.get("size", 0))}],
+                    "bids": [{"price": best_bid, "size": 0}],
                     "asks": [{"price": best_ask, "size": 0}],
                     "best_bid": best_bid,
                     "best_ask": best_ask,
@@ -190,7 +190,8 @@ def _parse_orderbook(raw: dict) -> dict | None:
                                 and len(prev.get("asks", [])) > 1):
                             entry["asks"] = prev["asks"]
                         new_bids = entry.get("bids", [])
-                        if (len(new_bids) == 1 and len(prev.get("bids", [])) > 1):
+                        if (len(new_bids) == 1 and new_bids[0].get("size", 0) == 0
+                                and len(prev.get("bids", [])) > 1):
                             entry["bids"] = prev["bids"]
                     _orderbooks[asset_id] = entry
                     _orderbooks.move_to_end(asset_id)
@@ -276,6 +277,9 @@ def cache_orderbook(token_id: str, ob: dict) -> None:
         _orderbooks.popitem(last=False)
 
 
+_subscribe_lock = asyncio.Lock()
+
+
 async def subscribe_markets(ws: websockets.WebSocketClientProtocol, token_ids: list[str]) -> None:
     """Subscribe to the CLOB market channel for a batch of token IDs.
 
@@ -288,23 +292,32 @@ async def subscribe_markets(ws: websockets.WebSocketClientProtocol, token_ids: l
     if not token_ids:
         return
 
-    # Filter out already-subscribed tokens
-    new_ids = [t for t in token_ids if t not in _subscribed_markets]
-    if not new_ids:
-        return
+    async with _subscribe_lock:
+        # Filter out already-subscribed tokens
+        new_ids = [t for t in token_ids if t not in _subscribed_markets]
+        if not new_ids:
+            return
 
-    # Cap total subscriptions at _MAX_SUBSCRIPTIONS
-    if len(_subscribed_markets) + len(new_ids) > _MAX_SUBSCRIPTIONS:
-        tokens_to_prune = (len(_subscribed_markets) + len(new_ids)) - _MAX_SUBSCRIPTIONS
-        await prune_stale_subscriptions(force_count=tokens_to_prune)
+        # Cap total subscriptions at _MAX_SUBSCRIPTIONS
+        if len(_subscribed_markets) + len(new_ids) > _MAX_SUBSCRIPTIONS:
+            tokens_to_prune = (len(_subscribed_markets) + len(new_ids)) - _MAX_SUBSCRIPTIONS
+            await prune_stale_subscriptions(force_count=tokens_to_prune)
+            # Re-check — pruning may not have freed enough slots
+            remaining = _MAX_SUBSCRIPTIONS - len(_subscribed_markets)
+            if remaining <= 0:
+                log.warning("subscription_cap_reached", wanted=len(new_ids), available=0)
+                return
+            if len(new_ids) > remaining:
+                log.debug("subscription_cap_truncated", wanted=len(new_ids), available=remaining)
+                new_ids = new_ids[:remaining]
 
-    msg = orjson.dumps({
-        "assets_ids": new_ids,
-        "type": "market",
-    })
-    await ws.send(msg)
-    _subscribed_markets.update(new_ids)
-    log.debug("subscribed_batch", count=len(new_ids), total=len(_subscribed_markets))
+        msg = orjson.dumps({
+            "assets_ids": new_ids,
+            "type": "market",
+        })
+        await ws.send(msg)
+        _subscribed_markets.update(new_ids)
+        log.debug("subscribed_batch", count=len(new_ids), total=len(_subscribed_markets))
 
 
 async def subscribe_market(ws: websockets.WebSocketClientProtocol, token_id: str) -> None:
@@ -493,9 +506,6 @@ async def auto_subscribe_active_markets(ws: websockets.WebSocketClientProtocol, 
     except Exception as exc:
         log.warning("auto_subscribe_fetch_failed", error=str(exc))
         return 0
-
-    if not isinstance(raw_markets, list):
-        raw_markets = raw_markets.get("data", raw_markets.get("markets", []))
 
     # Collect all token IDs first, then batch-subscribe
     all_token_ids: list[str] = []

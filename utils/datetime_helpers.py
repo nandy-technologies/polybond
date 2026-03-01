@@ -20,11 +20,11 @@ def ensure_utc(dt: datetime | str | None) -> datetime | None:
     
     if isinstance(dt, str):
         # Parse ISO string
-        dt_parsed = datetime.fromisoformat(dt.rstrip("Z"))
-        return dt_parsed.replace(tzinfo=timezone.utc) if dt_parsed.tzinfo is None else dt_parsed
-    
+        dt_parsed = datetime.fromisoformat(dt.removesuffix("Z"))
+        return dt_parsed.replace(tzinfo=timezone.utc) if dt_parsed.tzinfo is None else dt_parsed.astimezone(timezone.utc)
+
     # datetime object
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def to_db_timestamp(dt: datetime | None) -> str | None:

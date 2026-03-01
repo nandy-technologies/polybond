@@ -113,7 +113,7 @@
         <h2>Key Metrics</h2>
         <div class="kpi-hero-row">
           <div class="stat-card stat-card-hero">
-            {% set equity = (overview.wallet_usdc or 0) + (overview.invested or 0) + (overview.unrealized_pnl or 0) %}
+            {% set equity = (overview.wallet_usdc if overview.wallet_usdc is not none else (overview.cash or 0)) + (overview.invested or 0) + (overview.unrealized_pnl or 0) %}
             <div class="value" id="kpi-wallet"><span class="bal-val">${{ "{:,.2f}".format(equity) }}</span></div>
             <div class="label">Equity</div>
             <div class="sublabel" id="kpi-wallet-sub">${{ "{:,.2f}".format(overview.wallet_usdc or 0) }} cash · ${{ "{:,.2f}".format(overview.invested or 0) }} invested · ${{ "{:,.2f}".format(overview.wallet_usdc_onchain or 0) }} on-chain · {{ "{:,.4f}".format(overview.wallet_pol or 0) }} POL</div>
@@ -164,7 +164,7 @@
             <div class="value" id="kpi-drawdown">{{ "%.1f"|format(overview.drawdown_pct) }}%</div>
             <div class="label">Drawdown</div>
             <div class="drawdown-gauge">
-              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > bond_halt_drawdown_pct * 75 else 'dd-warn' if overview.drawdown_pct > bond_halt_drawdown_pct * 25 else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct / (bond_halt_drawdown_pct * 100) * 100, 100] | min }}%"></div></div>
+              <div class="drawdown-track"><div class="drawdown-fill {{ 'dd-danger' if overview.drawdown_pct > (bond_halt_drawdown_pct * 100) * dd_bar_danger_frac else 'dd-warn' if overview.drawdown_pct > (bond_halt_drawdown_pct * 100) * dd_bar_warn_frac else 'dd-ok' }}" id="kpi-drawdown-bar" style="width:{{ [overview.drawdown_pct / (bond_halt_drawdown_pct * 100) * 100, 100] | min }}%"></div></div>
               <span class="drawdown-label" id="kpi-drawdown-limit">/ {{ "%.0f"|format(bond_halt_drawdown_pct * 100) }}%</span>
             </div>
           </div>
@@ -583,7 +583,15 @@
       tradingStatusPollMs: {{ trading_status_poll_ms }},
       minBuyableUsd: {{ min_buyable_usd }},
       drawdownWarnPct: {{ drawdown_warn_pct }},
-      haltDrawdownPct: {{ (bond_halt_drawdown_pct * 100)|round(1) }}
+      haltDrawdownPct: {{ (bond_halt_drawdown_pct * 100)|round(1) }},
+      strategyPollMs: {{ strategy_poll_ms }},
+      scoreAccentThreshold: {{ score_accent_threshold }},
+      ageFreshHours: {{ age_fresh_hours }},
+      ageMatureHours: {{ age_mature_hours }},
+      zscoreWarn: {{ zscore_warn }},
+      zscoreDanger: {{ zscore_danger }},
+      ddBarWarnFrac: {{ dd_bar_warn_frac }},
+      ddBarDangerFrac: {{ dd_bar_danger_frac }}
     };
   </script>
   <script src="/static/dashboard.js"></script>

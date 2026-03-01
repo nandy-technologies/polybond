@@ -2,6 +2,7 @@
 var _tk=new URLSearchParams(location.search).get('token')||'';
 function apiUrl(p){return p+(_tk?(p.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(_tk):'');}
 
+var _C=window.DASHBOARD_CONFIG||{};
 var _tabHidden=document.hidden||false;
 var _activeDashTab='portfolio';
 document.addEventListener('visibilitychange',function(){_tabHidden=document.hidden;});
@@ -28,7 +29,8 @@ var _initialLoadDone=false;
   });
   // Restore saved tab on load
   var savedTab = localStorage.getItem('activeTab');
-  if(savedTab){
+  var validTabs = ['portfolio', 'opportunities', 'watchlist', 'strategy'];
+  if(savedTab && validTabs.indexOf(savedTab) >= 0){
     _activeDashTab=savedTab;
     var t = document.querySelector('.tab[data-tab="'+savedTab+'"]');
     if(t) t.click();
@@ -169,8 +171,8 @@ var _initialLoadDone=false;
   function N(v){return v||0;}
   function polyLink(r,text){
     if(!r.slug)return text;
-    var url='https://polymarket.com/event/'+(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+r.slug:'');
-    return '<a href="'+url+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none">'+text+'</a>';
+    var url='https://polymarket.com/event/'+encodeURIComponent(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+encodeURIComponent(r.slug):'');
+    return '<a href="'+htmlEscape(url)+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none">'+text+'</a>';
   }
   function sortData(data,key,asc){
     data.sort(function(a,b){
@@ -309,7 +311,7 @@ var _initialLoadDone=false;
         var ov=document.createElement('div');
         ov.className='error-state';
         ov.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--surface);z-index:1';
-        ov.innerHTML='Chart data unavailable<br><button class="retry-btn" onclick="loadEquityChart()">Retry</button>';
+        ov.innerHTML='Chart data unavailable<br><button class="retry-btn" data-retry="loadEquityChart">Retry</button>';
         wrap.style.position='relative';
         wrap.appendChild(ov);
       }
@@ -335,7 +337,7 @@ var _initialLoadDone=false;
       if(d.error)return;
       var netPnl=(d.realized_pnl||0)+(d.unrealized_pnl||0);
       var wOC=d.wallet_usdc_onchain!=null?d.wallet_usdc_onchain:0;
-      var wEx=d.wallet_usdc!=null?d.wallet_usdc:0;
+      var wEx=d.wallet_usdc!=null?d.wallet_usdc:(d.cash||0);
       var wPol=d.wallet_pol!=null?d.wallet_pol:0;
       var totalEquity=wEx+d.invested+N(d.unrealized_pnl);
       flashIfChanged('kpi-wallet',fmtMoney(totalEquity));
@@ -358,7 +360,7 @@ var _initialLoadDone=false;
       var dailyEl=document.getElementById('kpi-daily-orders');if(dailyEl){var filled=d.daily_orders_filled||0;dailyEl.textContent=filled+'/'+(d.daily_orders_max||0);}
       var ddEl=document.getElementById('kpi-drawdown');var ddPct=d.drawdown_pct||0;if(ddEl){ddEl.textContent=ddPct.toFixed(1)+'%';ddEl.className='value '+(ddPct>window.DASHBOARD_CONFIG.haltDrawdownPct?'pnl-negative':ddPct>window.DASHBOARD_CONFIG.drawdownWarnPct?'pnl-warn':'');}
       var _haltPct=window.DASHBOARD_CONFIG.haltDrawdownPct;
-      var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct/_haltPct*100)+'%';ddBar.className='drawdown-fill '+(ddPct>_haltPct*0.75?'dd-danger':ddPct>_haltPct*0.25?'dd-warn':'dd-ok');}
+      var ddBar=document.getElementById('kpi-drawdown-bar');if(ddBar){ddBar.style.width=Math.min(100,ddPct/_haltPct*100)+'%';ddBar.className='drawdown-fill '+(ddPct>_haltPct*(_C.ddBarDangerFrac||0.75)?'dd-danger':ddPct>_haltPct*(_C.ddBarWarnFrac||0.25)?'dd-warn':'dd-ok');}
       document.getElementById('header-positions').textContent=(d.position_count||0)+' positions';
       document.getElementById('header-wallet').innerHTML='<span class="bal-val">'+fmtMoney(wOC)+'</span><span style="color:var(--text-muted);font-size:0.75rem;margin:0 4px">USDC</span><span style="color:var(--text-muted);font-size:0.75rem;margin-right:4px">|</span>'+wPol.toFixed(4)+'<span style="color:var(--text-muted);font-size:0.75rem;margin-left:4px">POL</span>';
       updateFooterTimestamp();
@@ -376,7 +378,7 @@ var _initialLoadDone=false;
     if(!openedAt)return {text:'\u2014',cls:'',hours:0};
     var d=new Date(openedAt);if(isNaN(d.getTime()))return {text:'\u2014',cls:'',hours:0};
     var h=Math.max(0,(Date.now()-d.getTime())/3600000);
-    var cls=h<24?'age-fresh':h<72?'age-mature':'age-stale';
+    var cls=h<(_C.ageFreshHours||24)?'age-fresh':h<(_C.ageMatureHours||72)?'age-mature':'age-stale';
     if(h<1)return {text:Math.round(h*60)+'m',cls:cls,hours:h};
     if(h<24)return {text:Math.round(h)+'h',cls:cls,hours:h};
     return {text:Math.floor(h/24)+'d '+Math.round(h%24)+'h',cls:cls,hours:h};
@@ -423,7 +425,7 @@ var _initialLoadDone=false;
       html+='<td class="td-muted">'+relTime(r.end_date)+'</td>';
       html+='<td>'+(posStatus==='exiting'?'<span class="pos-badge pos-badge-exiting">EXITING\u2026</span>':'<button class="btn-action btn-exit" data-market="'+htmlEscape(r.market_id)+'" data-token="'+htmlEscape(r.token_id)+'">Exit</button>')+'</td></tr>';
       // Expandable detail row
-      var pLink=r.slug?'https://polymarket.com/event/'+(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+r.slug:''):'';
+      var pLink=r.slug?'https://polymarket.com/event/'+encodeURIComponent(r.event_slug||r.slug)+(r.event_slug&&r.event_slug!==r.slug?'/'+encodeURIComponent(r.slug):''):'';
       html+='<tr class="pos-expand-row" data-pidx="'+idx+'"><td colspan="'+cols.length+'">';
       html+='<div class="pos-detail-grid">';
       html+='<div class="pos-detail-item"><div class="pos-detail-label">Market ID</div><div class="pos-detail-value" style="font-size:0.7rem;word-break:break-all">'+htmlEscape(r.market_id||'')+'</div></div>';
@@ -606,10 +608,10 @@ var _initialLoadDone=false;
     html+='<td class="num">'+N(r.price).toFixed(3)+'</td>';
     html+='<td class="num" style="color:var(--text-muted)">'+N(r.days_remaining).toFixed(1)+'</td>';
     html+='<td class="num" style="color:var(--text-muted)">'+N(r.spread).toFixed(3)+'</td>';
-    html+='<td class="num" style="color:var(--text-muted)">$'+(N(r.volume)/1e6).toFixed(1)+'M</td>';
+    var vol=N(r.volume);html+='<td class="num" style="color:var(--text-muted)">'+(vol>=1e6?'$'+(vol/1e6).toFixed(1)+'M':'$'+Math.round(vol/1e3)+'k')+'</td>';
     html+='<td class="num">'+(N(r.annualized_yield)*100).toFixed(1)+'%</td>';
     var sc=N(r.opportunity_score);
-    html+='<td class="num" style="font-weight:700;color:'+(sc>=0.01?'var(--accent)':'var(--text-muted)')+'">'+sc.toFixed(4)+'</td>';
+    html+='<td class="num" style="font-weight:700;color:'+(sc>=(_C.scoreAccentThreshold||0.01)?'var(--accent)':'var(--text-muted)')+'">'+sc.toFixed(4)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.yield_score)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.liquidity_score)+'</td>';
     html+='<td class="num factor-cell">'+bar(r.time_value)+'</td>';
@@ -618,7 +620,7 @@ var _initialLoadDone=false;
     html+='<td class="num factor-cell">'+bar(r.spread_efficiency)+'</td>';
     html+='<td class="num"><span class="bal-val">'+(r.computed_size?fmtMoney(r.computed_size):'\u2014')+'</span></td>';
     var canBuy=isBuyable&&r.computed_size&&r.computed_size>=window.DASHBOARD_CONFIG.minBuyableUsd;
-    html+='<td>'+(canBuy?'<button class="btn-action btn-buy" data-market="'+htmlEscape(r.market_id)+'" data-token="'+htmlEscape(r.token_id)+'" data-outcome="'+htmlEscape(r.outcome)+'">Buy</button>':'<span class="td-muted" title="Edge too small">\u2014</span>')+'</td></tr>';
+    html+='<td>'+(canBuy?'<button class="btn-action btn-buy" data-market="'+htmlEscape(r.market_id)+'" data-token="'+htmlEscape(r.token_id)+'" data-outcome="'+htmlEscape(r.outcome)+'" data-size="'+(r.computed_size||0)+'" data-price="'+N(r.price).toFixed(3)+'">Buy</button>':'<span class="td-muted" title="Edge too small">\u2014</span>')+'</td></tr>';
     return html;
   }
 
@@ -631,7 +633,7 @@ var _initialLoadDone=false;
     if(chev)chev.textContent=visible?'\u25B6':'\u25BC';
     headerRow.classList.toggle('expanded',!visible);
   }
-  window.toggleEventRows=toggleEventRows;
+  // toggleEventRows is called via delegated click handler below
 
   function renderOpportunities(rows){
     if(_oppsResizing)return;  // Don't re-render during active column drag
@@ -692,7 +694,7 @@ var _initialLoadDone=false;
       }else{
         // Multi-market event — accordion header
         var eid='evt-'+key.replace(/[^a-z0-9]/gi,'').slice(0,40);
-        html+='<tr class="event-header" data-eid="'+eid+'" onclick="toggleEventRows(this)">';
+        html+='<tr class="event-header" data-eid="'+eid+'">';
         html+='<td><div class="event-td-inner"><span class="event-title">'+htmlEscape(g.title||'\u2014')+'</span>';
         html+=' <span class="event-count">'+g.rows.length+'</span>';
         html+=' <span class="event-chevron">\u25B6</span></div></td>';
@@ -700,10 +702,10 @@ var _initialLoadDone=false;
         html+='<td class="num">'+N(best.price).toFixed(3)+'</td>';
         html+='<td class="num" style="color:var(--text-muted)">'+N(best.days_remaining).toFixed(1)+'</td>';
         html+='<td class="num" style="color:var(--text-muted)">'+N(best.spread).toFixed(3)+'</td>';
-        html+='<td class="num" style="color:var(--text-muted)">$'+(N(best.volume)/1e6).toFixed(1)+'M</td>';
+        var bvol=N(best.volume);html+='<td class="num" style="color:var(--text-muted)">'+(bvol>=1e6?'$'+(bvol/1e6).toFixed(1)+'M':'$'+Math.round(bvol/1e3)+'k')+'</td>';
         html+='<td class="num">'+(N(best.annualized_yield)*100).toFixed(1)+'%</td>';
         var bsc=N(best.opportunity_score);
-        html+='<td class="num" style="font-weight:700;color:'+(bsc>=0.01?'var(--accent)':'var(--text-muted)')+'">'+bsc.toFixed(4)+'</td>';
+        html+='<td class="num" style="font-weight:700;color:'+(bsc>=(_C.scoreAccentThreshold||0.01)?'var(--accent)':'var(--text-muted)')+'">'+bsc.toFixed(4)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.yield_score)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.liquidity_score)+'</td>';
         html+='<td class="num factor-cell">'+bar(best.time_value)+'</td>';
@@ -814,19 +816,23 @@ var _initialLoadDone=false;
     _oppsLoading=true;
     fetchWithTimeout(apiUrl('/api/bonds/opportunities')).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
       if(data.error){document.getElementById('opportunities-table').innerHTML=errorHtml(data.error,'loadOpportunities');document.getElementById('opps-count').textContent='error';return;}
-      var newJson=JSON.stringify(data);
+      var candidates=data.candidates||(Array.isArray(data)?data:[]);
+      var scannedAt=data.scanned_at||null;
+      var newJson=JSON.stringify(candidates);
+      if(scannedAt){var age=Math.round((Date.now()-new Date(scannedAt).getTime())/1000);document.getElementById('opps-count').textContent=(candidates.length||_oppsData.length)+' \u00b7 '+age+'s ago';}
       if(newJson===_oppsLastJson)return;
       _oppsLastJson=newJson;
-      _oppsData=Array.isArray(data)?data:[];
-      _oppsData=_oppsData.filter(function(r){return r.opportunity_score>0;});
+      _oppsData=candidates.filter(function(r){return r.opportunity_score>0;});
       renderOpportunities(_oppsData);
+      if(!scannedAt){document.getElementById('opps-count').textContent=_oppsData.length+'';}
     }).catch(function(){
+      _oppsLastJson='';
       document.getElementById('opportunities-table').innerHTML=errorHtml('Failed to load opportunities','loadOpportunities');
       document.getElementById('opps-count').textContent='error';
     }).finally(function(){_oppsLoading=false;});
   }
   var _oppsInterval=null;
-  function startOppsPolling(){if(!_oppsInterval)_oppsInterval=setInterval(loadOpportunities,window.DASHBOARD_CONFIG.oppsPollMs);}
+  function startOppsPolling(){if(!_oppsInterval){loadOpportunities();_oppsInterval=setInterval(loadOpportunities,window.DASHBOARD_CONFIG.oppsPollMs);}}
   function stopOppsPolling(){if(_oppsInterval){clearInterval(_oppsInterval);_oppsInterval=null;}}
 
   // -- Watchlist (sortable) --
@@ -863,7 +869,7 @@ var _initialLoadDone=false;
       html+='<td class="num">'+N(r.current_price).toFixed(3)+'</td>';
       html+='<td class="num" style="color:var(--text-muted)">'+N(r.ewma_price).toFixed(3)+'</td>';
       var absZ=Math.abs(N(r.z_score));
-      html+='<td class="num '+(absZ>2?'pnl-negative':absZ>1?'pnl-warn':'')+'">'+N(r.z_score).toFixed(2)+'</td>';
+      html+='<td class="num '+(absZ>(_C.zscoreDanger||2)?'pnl-negative':absZ>(_C.zscoreWarn||1)?'pnl-warn':'')+'">'+N(r.z_score).toFixed(2)+'</td>';
       html+='<td class="num factor-cell">'+wBar(r.alert_intensity)+'</td>';
       html+='<td class="num">$'+Math.round(N(r.volume)).toLocaleString('en-US')+'</td>';
       html+='<td class="td-muted">'+(r.last_alerted_at?relTime(r.last_alerted_at):'\u2014')+'</td>';
@@ -941,12 +947,12 @@ var _initialLoadDone=false;
           showCopyToast(isBuy
               ? 'Order: $'+(d.size_usd||0).toFixed(2)+' @ '+(d.price||0).toFixed(3)
               : 'Exit @ '+(d.price||0).toFixed(3));
+          setTimeout(loadWatchlist, 1000);
       }).catch(function(e){
           showCopyToast('Error: '+e.message,true);
           if(btn){btn.classList.remove('loading');btn.textContent=isBuy?(side==='Yes'?'Buy Yes':'Buy No'):(side==='Yes'?'Exit Yes':'Exit No');}
       }).finally(function(){
           _pendingTrades.delete(key);
-          setTimeout(loadWatchlist, 1000);
       });
     });
   }
@@ -976,7 +982,7 @@ var _initialLoadDone=false;
     });
   }
   var _watchInterval=null;
-  function startWatchPolling(){if(!_watchInterval)_watchInterval=setInterval(loadWatchlist,window.DASHBOARD_CONFIG.watchlistPollMs);}
+  function startWatchPolling(){if(!_watchInterval){loadWatchlist();_watchInterval=setInterval(loadWatchlist,window.DASHBOARD_CONFIG.watchlistPollMs);}}
   function stopWatchPolling(){if(_watchInterval){clearInterval(_watchInterval);_watchInterval=null;}}
 
   // -- Exit position action --
@@ -986,7 +992,10 @@ var _initialLoadDone=false;
       fetchWithTimeout(apiUrl('/api/bonds/positions/close'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({market_id:marketId,token_id:tokenId})
-      }).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
+      }).then(function(r){
+        if(!r.ok) return r.json().catch(function(){throw new Error('HTTP '+r.status)}).then(function(d){throw new Error(d.error||'HTTP '+r.status)});
+        return r.json();
+      }).then(function(d){
         if(d.ok){showCopyToast('Exit order placed');loadPositions();loadPendingOrders();}
         else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
       }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
@@ -1000,7 +1009,10 @@ var _initialLoadDone=false;
       fetchWithTimeout(apiUrl('/api/bonds/orders/cancel'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({order_id:orderId,clob_order_id:clobOrderId})
-      }).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
+      }).then(function(r){
+        if(!r.ok) return r.json().catch(function(){throw new Error('HTTP '+r.status)}).then(function(d){throw new Error(d.error||'HTTP '+r.status)});
+        return r.json();
+      }).then(function(d){
         if(d.ok){showCopyToast('Order cancelled');loadPendingOrders();}
         else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
       }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
@@ -1009,12 +1021,18 @@ var _initialLoadDone=false;
 
   // -- Buy opportunity action --
   function buyOpportunity(marketId,tokenId,outcome,btn){
-    showConfirm('Place Buy Order?','Place a buy order for '+outcome+'?','Buy','btn-confirm-on',function(){
+    var sz=btn&&btn.dataset.size?'$'+N(btn.dataset.size).toFixed(2):'';
+    var pr=btn&&btn.dataset.price?btn.dataset.price:'';
+    var detail='Buy '+outcome+(sz?' ~'+sz:'')+(pr?' near '+pr:'')+'?\nOrder placed at best bid + 1 tick.';
+    showConfirm('Place Buy Order?',detail,'Buy','btn-confirm-on',function(){
       if(btn)btn.disabled=true;
       fetchWithTimeout(apiUrl('/api/bonds/opportunities/buy'),{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({market_id:marketId,token_id:tokenId,outcome:outcome})
-      }).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()}).then(function(d){
+      }).then(function(r){
+        if(!r.ok) return r.json().catch(function(){throw new Error('HTTP '+r.status)}).then(function(d){throw new Error(d.error||'HTTP '+r.status)});
+        return r.json();
+      }).then(function(d){
         if(d.ok){showCopyToast('Buy order placed: $'+(d.size_usd||0).toFixed(2)+' @ '+(d.price||0).toFixed(3));loadOpportunities();loadPendingOrders();}
         else{showCopyToast('Error: '+(d.error||'Unknown'),true);}
       }).catch(function(e){showCopyToast('Error: '+e.message,true);}).finally(function(){if(btn)btn.disabled=false;});
@@ -1029,6 +1047,8 @@ var _initialLoadDone=false;
     if(cancelBtn){cancelOrder(Number(cancelBtn.dataset.oid),cancelBtn.dataset.clob,cancelBtn);return;}
     var buyBtn=e.target.closest('.btn-buy[data-market]');
     if(buyBtn){buyOpportunity(buyBtn.dataset.market,buyBtn.dataset.token,buyBtn.dataset.outcome,buyBtn);return;}
+    var evtHdr=e.target.closest('.event-header[data-eid]');
+    if(evtHdr){toggleEventRows(evtHdr);return;}
   });
 
   // Expose functions for retry buttons (onclick runs in global scope)
@@ -1091,6 +1111,7 @@ var _initialLoadDone=false;
   });
   cancelBtn.addEventListener('click',function(){overlay.classList.remove('active')});
   overlay.addEventListener('click',function(e){if(e.target===overlay)overlay.classList.remove('active')});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&overlay.classList.contains('active'))overlay.classList.remove('active')});
   fetchStatus();
   setInterval(fetchStatus,window.DASHBOARD_CONFIG.tradingStatusPollMs);
 })();
@@ -1116,10 +1137,10 @@ function attachScrollFade(container){
 
 // -- Strategy live stats polling --
 var _strategyTimer=null;
-function startStrategyPolling(){fetchStrategy();_strategyTimer=setInterval(fetchStrategy,30000);}
+function startStrategyPolling(){if(!_strategyTimer){fetchStrategy();_strategyTimer=setInterval(fetchStrategy,_C.strategyPollMs||30000);}}
 function stopStrategyPolling(){if(_strategyTimer){clearInterval(_strategyTimer);_strategyTimer=null;}}
 function fetchStrategy(){
-  fetch(apiUrl('/api/bonds/strategy')).then(function(r){return r.json();}).then(function(d){
+  fetchWithTimeout(apiUrl('/api/bonds/strategy')).then(function(r){return r.json();}).then(function(d){
     if(d.error)return;
     var badge=document.getElementById('strategy-live-badge');
     if(badge)badge.textContent='live';

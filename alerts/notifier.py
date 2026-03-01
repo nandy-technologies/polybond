@@ -40,6 +40,7 @@ async def send_imsg(message: str, skip_dedup: bool = False) -> bool:
         return False
 
     # Fix #23: Check for duplicate alerts (unless skip_dedup=True)
+    msg_hash: str | None = None
     if not skip_dedup:
         import hashlib
         msg_hash = hashlib.sha256(message.encode()).hexdigest()[:16]
@@ -51,16 +52,9 @@ async def send_imsg(message: str, skip_dedup: bool = False) -> bool:
                      last_sent_secs_ago=round(now - last_sent, 1))
             return False  # Suppress duplicate
 
-        # Insert/update and move to end (most recent)
-        _alert_cache[msg_hash] = now
-        _alert_cache.move_to_end(msg_hash)
-        # Evict oldest entries if cache exceeds max size
-        while len(_alert_cache) > _ALERT_CACHE_MAX_SIZE:
-            _alert_cache.popitem(last=False)
-
     cmd = ["imsg", "send", "--handle", IMSG_HANDLE, "--text", message]
 
-    # Hold semaphore only for rate-limiting, release before subprocess wait
+    # Hold semaphore for rate-limiting AND subprocess — ALERT_SEND_TIMEOUT bounds hold time
     async with _send_semaphore:
         now = _time.monotonic()
         wait = _MIN_SEND_INTERVAL - (now - _last_send_time)
@@ -68,39 +62,44 @@ async def send_imsg(message: str, skip_dedup: bool = False) -> bool:
             await asyncio.sleep(wait)
         _last_send_time = _time.monotonic()
 
-    # Subprocess runs outside semaphore so a stuck iMessage doesn't block other alerts
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=config.ALERT_SEND_TIMEOUT)
-
-        if proc.returncode == 0:
-            log.info("imsg_sent", message=message[:120])
-            return True
-        else:
-            log.warning(
-                "imsg_send_failed",
-                returncode=proc.returncode,
-                stderr=stderr.decode(errors="replace")[:300],
-            )
-            return False
-
-    except asyncio.TimeoutError:
-        log.error("imsg_send_timeout", message=message[:80])
         try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        return False
-    except FileNotFoundError:
-        log.error("imsg_not_found", hint="Is 'imsg' on PATH?")
-        return False
-    except Exception as exc:
-        log.error("imsg_send_error", error=str(exc), type=type(exc).__name__)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=config.ALERT_SEND_TIMEOUT)
+
+            if proc.returncode == 0:
+                log.info("imsg_sent", message=message[:120])
+                # Only cache after confirmed successful send
+                if msg_hash is not None:
+                    _alert_cache[msg_hash] = _time.monotonic()
+                    _alert_cache.move_to_end(msg_hash)
+                    while len(_alert_cache) > _ALERT_CACHE_MAX_SIZE:
+                        _alert_cache.popitem(last=False)
+                return True
+            else:
+                log.warning(
+                    "imsg_send_failed",
+                    returncode=proc.returncode,
+                    stderr=stderr.decode(errors="replace")[:300],
+                )
+                return False
+
+        except asyncio.TimeoutError:
+            log.error("imsg_send_timeout", message=message[:80])
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            return False
+        except FileNotFoundError:
+            log.error("imsg_not_found", hint="Is 'imsg' on PATH?")
+            return False
+        except Exception as exc:
+            log.error("imsg_send_error", error=str(exc), type=type(exc).__name__)
         return False
 
 

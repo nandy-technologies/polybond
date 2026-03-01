@@ -100,9 +100,36 @@ def _attempt_recovery() -> None:
         except Exception as exc:
             log.warning("backup_restore_unusable", error=str(exc))
 
-    # Phase 3: nuke and recreate as last resort
+    # Phase 3: nuke and recreate as ABSOLUTE last resort
+    # This destroys all position and order history — require explicit opt-in
+    if not config.ALLOW_DB_NUKE:
+        log.critical("duckdb_nuke_refused — set ALLOW_DB_NUKE=true to permit; bot halting")
+        try:
+            from alerts.notifier import send_imsg
+            import asyncio
+            asyncio.run(send_imsg(
+                "CRITICAL: DB corrupt, all backups failed, ALLOW_DB_NUKE=false. "
+                "Bot halted. Manual intervention required."
+            ))
+        except Exception:
+            pass
+        import sys
+        sys.exit(2)
+
     log.error("duckdb_nuke_and_recreate")
     db_path = Path(config.DUCKDB_PATH)
+
+    # Preserve the corrupt file before nuking
+    try:
+        from datetime import datetime, timezone
+        corrupt_dest = db_path.parent / "backups" / f"corrupt-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.duckdb"
+        corrupt_dest.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copy2(str(db_path), str(corrupt_dest))
+        log.info("corrupt_db_preserved", path=str(corrupt_dest))
+    except Exception:
+        pass
+
     db_path.unlink(missing_ok=True)
     for wal in db_path.parent.glob(f"{db_path.name}.*"):
         wal.unlink(missing_ok=True)
@@ -291,7 +318,9 @@ def _run_migrations(conn: duckdb.DuckDBPyConnection) -> None:
             log.info("migration_applied", version=version, description=desc)
         except Exception as exc:
             # Column/table may already exist from old ad-hoc migrations
-            if "already exists" in str(exc).lower() or "Catalog" in type(exc).__name__:
+            exc_msg = str(exc).lower()
+            is_already_exists = "already exists" in exc_msg or "duplicate" in exc_msg
+            if is_already_exists:
                 try:
                     conn.execute(
                         "INSERT INTO schema_migrations VALUES (?, current_timestamp, ?) ON CONFLICT DO NOTHING",
@@ -302,6 +331,7 @@ def _run_migrations(conn: duckdb.DuckDBPyConnection) -> None:
                     pass
             else:
                 log.error("migration_failed", version=version, description=desc, error=str(exc),
+                          type=type(exc).__name__,
                           hint="This migration was NOT applied — manual intervention may be needed")
 
 
@@ -345,12 +375,22 @@ _DB_TIMEOUT: float = config.DB_QUERY_TIMEOUT
 
 async def aexecute(sql: str, params: list | None = None) -> None:
     """Async execute with timeout."""
-    await asyncio.wait_for(asyncio.to_thread(execute, sql, params), timeout=_DB_TIMEOUT)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(execute, sql, params), timeout=_DB_TIMEOUT)
+    except asyncio.TimeoutError:
+        # Don't mark conn error — the to_thread task is still running and holds _db_lock.
+        # Closing the connection underneath it is undefined behavior in DuckDB.
+        log.error("db_execute_timeout", sql=sql[:100])
+        raise
 
 
 async def aquery(sql: str, params: list | None = None) -> list[tuple]:
     """Async query with timeout."""
-    return await asyncio.wait_for(asyncio.to_thread(query, sql, params), timeout=_DB_TIMEOUT)
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(query, sql, params), timeout=_DB_TIMEOUT)
+    except asyncio.TimeoutError:
+        log.error("db_query_timeout", sql=sql[:100])
+        raise
 
 
 async def prune_bond_equity(keep_days: int = 90) -> None:

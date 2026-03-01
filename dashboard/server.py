@@ -24,10 +24,14 @@ from dashboard.dashboard_config import (
     get_module_status, EQUITY_CHART_POLL_MS, KPI_POLL_MS,
     POSITIONS_POLL_MS, ORDERS_POLL_MS, HISTORY_POLL_MS,
     OPPS_POLL_MS, WATCHLIST_POLL_MS, TRADING_STATUS_POLL_MS,
+    STRATEGY_POLL_MS,
     SIZING_FORMULA, BOND_HISTORY_LIMIT, BOND_OPPORTUNITIES_LIMIT,
     BOND_ORDERS_LIMIT, WATCHLIST_LIMIT, MANUAL_TRADE_OPP_SCORE,
     EQUITY_CURVE_MAX_ROWS, INDEX_CACHE_TTL_SEC, OPPS_CACHE_TTL_SEC,
     FETCH_TIMEOUT_MS, MIN_BUYABLE_USD, DRAWDOWN_WARN_PCT,
+    SCORE_ACCENT_THRESHOLD, AGE_FRESH_HOURS, AGE_MATURE_HOURS,
+    ZSCORE_WARN, ZSCORE_DANGER, DD_BAR_WARN_FRAC, DD_BAR_DANGER_FRAC,
+    STOP_EXAMPLES_LIMIT,
 )
 
 log = get_logger("dashboard")
@@ -62,7 +66,9 @@ def _format_uptime() -> str:
         return f"Up {days}d {hours}h {minutes}m"
     elif hours > 0:
         return f"Up {hours}h {minutes}m"
-    return f"Up {minutes}m"
+    elif minutes > 0:
+        return f"Up {minutes}m"
+    return f"Up {int(elapsed)}s"
 
 
 async def _get_overview() -> dict:
@@ -156,7 +162,7 @@ async def _get_overview() -> dict:
             "daily_orders_max": config.BOND_MAX_DAILY_ORDERS,
             "daily_capital": round(daily_rows[0][2], 2) if daily_rows else 0,
             "peak_equity": round(_peak_equity, 2),
-            "drawdown_pct": max(0, round((1.0 - state["equity"] / _peak_equity) * 100, 1)) if _peak_equity > 0 else 0,
+            "drawdown_pct": min(100, max(0, round((1.0 - state["equity"] / _peak_equity) * 100, 1))) if _peak_equity > 0 else 0,
             "scan_stats": _last_scan_stats,
             "enabled": config.BOND_ENABLED,
         }
@@ -168,6 +174,7 @@ async def _get_overview() -> dict:
             "cash": 0, "invested": 0, "realized_pnl": 0, "unrealized_pnl": 0,
             "position_count": 0, "wins": 0, "losses": 0,
             "win_rate": 0, "annualized_yield": 0,
+            "realized_yield": 0,
             "portfolio_kelly": 0,
             "daily_orders_placed": 0, "daily_orders_filled": 0, "daily_orders_max": 0, "daily_capital": 0,
             "peak_equity": 0, "drawdown_pct": 0,
@@ -330,9 +337,17 @@ def create_app() -> FastAPI:
                 opps_poll_ms=OPPS_POLL_MS,
                 watchlist_poll_ms=WATCHLIST_POLL_MS,
                 trading_status_poll_ms=TRADING_STATUS_POLL_MS,
+                strategy_poll_ms=STRATEGY_POLL_MS,
                 drawdown_warn_pct=DRAWDOWN_WARN_PCT,
                 fetch_timeout_ms=FETCH_TIMEOUT_MS,
                 min_buyable_usd=MIN_BUYABLE_USD,
+                score_accent_threshold=SCORE_ACCENT_THRESHOLD,
+                age_fresh_hours=AGE_FRESH_HOURS,
+                age_mature_hours=AGE_MATURE_HOURS,
+                zscore_warn=ZSCORE_WARN,
+                zscore_danger=ZSCORE_DANGER,
+                dd_bar_warn_frac=DD_BAR_WARN_FRAC,
+                dd_bar_danger_frac=DD_BAR_DANGER_FRAC,
                 # exposure panel removed
             )
             _index_cache["html"] = rendered
@@ -379,7 +394,8 @@ def create_app() -> FastAPI:
             stop_examples = []
             try:
                 rows = await aquery(
-                    "SELECT question, entry_price FROM bond_positions WHERE status = 'open' ORDER BY entry_price DESC LIMIT 5")
+                    "SELECT question, entry_price FROM bond_positions WHERE status = 'open' ORDER BY entry_price DESC LIMIT ?",
+                    [STOP_EXAMPLES_LIMIT])
                 k = config.BOND_STOP_LOSS_K
                 cap = config.BOND_STOP_LOSS_PCT
                 for r in rows:
@@ -387,7 +403,7 @@ def create_app() -> FastAPI:
                     if entry and entry > 0:
                         max_gain = (1.0 / entry) - 1.0
                         stop_pct = min(cap, k * max_gain)
-                        stop_examples.append({"question": r[0][:60], "entry": round(entry, 4), "stop_pct": round(stop_pct * 100, 1)})
+                        stop_examples.append({"question": (r[0] or "")[:60], "entry": round(entry, 4), "stop_pct": round(stop_pct * 100, 1)})
             except Exception:
                 pass
 
@@ -497,7 +513,7 @@ def create_app() -> FastAPI:
     def _get_trade_lock(key: str) -> asyncio.Lock:
         now = time.time()
         if len(_trade_locks) > 50:
-            stale = [k for k, (_, t) in _trade_locks.items() if now - t > 300]
+            stale = [k for k, (lk, t) in _trade_locks.items() if now - t > 300 and not lk.locked()]
             for k in stale:
                 del _trade_locks[k]
         if key not in _trade_locks:
@@ -519,13 +535,17 @@ def create_app() -> FastAPI:
                 return JSONResponse(_opps_cache["data"])
 
             try:
-                from strategies.bond_scanner import scan_bond_candidates, compute_bond_size, get_bond_portfolio_state, _bond_wins, _bond_losses, _last_scan_candidates
+                from strategies.bond_scanner import scan_bond_candidates, compute_bond_size, get_bond_portfolio_state, _bond_wins, _bond_losses, _last_scan_candidates, _last_scan_stats
 
                 # Use cached candidates from last scanner run if available
                 if _last_scan_candidates:
                     candidates = _last_scan_candidates
                 else:
-                    candidates = await scan_bond_candidates()
+                    # Scanner hasn't run yet — return empty rather than blocking for 30s+
+                    empty = {"scanned_at": None, "candidates": []}
+                    _opps_cache["data"] = empty
+                    _opps_cache["ts"] = time.monotonic()
+                    return JSONResponse(empty)
 
                 # Deduplicate by market_id, keeping highest opportunity_score
                 seen = {}
@@ -551,16 +571,18 @@ def create_app() -> FastAPI:
                         days_remaining=c.get("effective_days", c["days_remaining"]),
                         wins=_bond_wins, losses=_bond_losses,
                         fee_rate_bps=config.BOND_DEFAULT_FEE_BPS,
-                        opp_score=c["opportunity_score"],
+                        opp_score=MANUAL_TRADE_OPP_SCORE,
                         synthetic_depth=c.get("synthetic_depth", False),
                     )
                     row = {k: round(v, 8 if k == 'opportunity_score' else 4) if isinstance(v, float) else v for k, v in c.items()}
                     row["exit_liquidity"] = row.get("resolution_confidence", 0)  # alias legacy field
                     row["computed_size"] = round(computed_size, 2)
                     result.append(row)
-                _opps_cache["data"] = result
+                scanned_at = _last_scan_stats.get("scanned_at") if _last_scan_stats else None
+                meta = {"scanned_at": scanned_at, "candidates": result}
+                _opps_cache["data"] = meta
                 _opps_cache["ts"] = time.monotonic()
-                return JSONResponse(result)
+                return JSONResponse(meta)
             except Exception as exc:
                 _opps_cache["data"] = None
                 _opps_cache["ts"] = 0.0
@@ -743,49 +765,55 @@ def create_app() -> FastAPI:
         if not order_id or not clob_order_id:
             return JSONResponse({"error": "Need order_id and clob_order_id"}, status_code=400)
 
-        try:
-            from execution.clob_client import cancel_order
-            from storage.db import aexecute
+        lock_key = f"cancel:{order_id}"
+        async with _get_trade_lock(lock_key):
+            try:
+                from execution.clob_client import cancel_order
+                from storage.db import aexecute
 
-            # Read order info BEFORE updating status (so we can still see side)
-            order_info = await aquery(
-                "SELECT side, market_id, token_id FROM bond_orders WHERE id = ?",
-                [order_id],
-            )
-            if not order_info:
-                return JSONResponse({"error": "Order not found"}, status_code=404)
-
-            cancelled = await cancel_order(clob_order_id)
-            if not cancelled:
-                return JSONResponse({"error": "Cancel request failed"}, status_code=502)
-
-            await aexecute(
-                "UPDATE bond_orders SET status = 'cancelled' WHERE id = ?",
-                [order_id],
-            )
-
-            # If this was a sell order, revert position from 'exiting' to 'open'
-            # if no other live sell orders remain for this market/token
-            if order_info and order_info[0][0] == "sell":
-                _mid, _tid = order_info[0][1], order_info[0][2]
-                remaining = await aquery(
-                    "SELECT COUNT(*) FROM bond_orders WHERE market_id = ? AND token_id = ? "
-                    "AND side = 'sell' AND status IN ('pending', 'open')",
-                    [_mid, _tid],
+                # Read order info and cross-validate clob_order_id + status
+                order_info = await aquery(
+                    "SELECT side, market_id, token_id, clob_order_id, status FROM bond_orders WHERE id = ?",
+                    [order_id],
                 )
-                if not remaining or remaining[0][0] == 0:
-                    await aexecute(
-                        "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp "
-                        "WHERE market_id = ? AND token_id = ? AND status = 'exiting'",
+                if not order_info:
+                    return JSONResponse({"error": "Order not found"}, status_code=404)
+                if order_info[0][3] != clob_order_id:
+                    return JSONResponse({"error": "clob_order_id mismatch"}, status_code=400)
+                if order_info[0][4] not in ('pending', 'open'):
+                    return JSONResponse({"error": f"Order already {order_info[0][4]}"}, status_code=409)
+
+                cancelled = await cancel_order(clob_order_id)
+                if not cancelled:
+                    return JSONResponse({"error": "Cancel request failed"}, status_code=502)
+
+                await aexecute(
+                    "UPDATE bond_orders SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'open')",
+                    [order_id],
+                )
+
+                # If this was a sell order, revert position from 'exiting' to 'open'
+                # if no other live sell orders remain for this market/token
+                if order_info[0][0] == "sell":
+                    _mid, _tid = order_info[0][1], order_info[0][2]
+                    remaining = await aquery(
+                        "SELECT COUNT(*) FROM bond_orders WHERE market_id = ? AND token_id = ? "
+                        "AND side = 'sell' AND status IN ('pending', 'open')",
                         [_mid, _tid],
                     )
-                    log.info("exiting_position_reverted_via_dashboard", market_id=log_id(_mid), token_id=log_id(_tid))
+                    if not remaining or remaining[0][0] == 0:
+                        await aexecute(
+                            "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp "
+                            "WHERE market_id = ? AND token_id = ? AND status = 'exiting'",
+                            [_mid, _tid],
+                        )
+                        log.info("exiting_position_reverted_via_dashboard", market_id=log_id(_mid), token_id=log_id(_tid))
 
-            log.info("order_cancelled_via_dashboard", order_id=order_id, clob_order_id=clob_order_id)
-            return JSONResponse({"ok": True})
-        except Exception as exc:
-            log.error("order_cancel_error", order_id=order_id, error=str(exc))
-            return JSONResponse({"error": "Internal server error"}, status_code=500)
+                log.info("order_cancelled_via_dashboard", order_id=order_id, clob_order_id=clob_order_id)
+                return JSONResponse({"ok": True})
+            except Exception as exc:
+                log.error("order_cancel_error", order_id=order_id, error=str(exc))
+                return JSONResponse({"error": "Internal server error"}, status_code=500)
 
     @app.post("/api/bonds/opportunities/buy")
     async def api_bonds_opportunity_buy(request: Request):
@@ -800,6 +828,8 @@ def create_app() -> FastAPI:
         outcome = body.get("outcome")
         if not market_id or not token_id or not outcome:
             return JSONResponse({"error": "Need market_id, token_id, and outcome"}, status_code=400)
+        if outcome not in ("Yes", "No"):
+            return JSONResponse({"error": "outcome must be 'Yes' or 'No'"}, status_code=400)
 
         # Per-market lock to prevent duplicate buy orders from double-clicks
         lock_key = f"buy:{market_id}:{token_id}"
@@ -834,6 +864,38 @@ def create_app() -> FastAPI:
                 if pending:
                     return JSONResponse({"error": f"Pending order already exists for {outcome}"}, status_code=409)
 
+                # Check for position on opposite side of same market
+                opp_side = await aquery(
+                    "SELECT id FROM bond_positions "
+                    "WHERE market_id = ? AND token_id != ? AND status IN ('open', 'exiting')",
+                    [market_id, token_id],
+                )
+                if opp_side:
+                    return JSONResponse({"error": "Already have a position in this market (opposite side)"}, status_code=409)
+
+                # Check for position or pending order in same event
+                _evt_slug = None
+                _evt_rows = await aquery("SELECT event_slug FROM markets WHERE id = ?", [market_id])
+                if _evt_rows and _evt_rows[0][0]:
+                    _evt_slug = _evt_rows[0][0]
+                if _evt_slug:
+                    event_pos = await aquery(
+                        "SELECT bp.id FROM bond_positions bp "
+                        "JOIN markets m ON bp.market_id = m.id "
+                        "WHERE m.event_slug = ? AND bp.status IN ('open', 'exiting')",
+                        [_evt_slug],
+                    )
+                    if event_pos:
+                        return JSONResponse({"error": "Already have a position in this event"}, status_code=409)
+                    event_pending = await aquery(
+                        "SELECT bo.id FROM bond_orders bo "
+                        "JOIN markets m ON bo.market_id = m.id "
+                        "WHERE m.event_slug = ? AND bo.status IN ('pending', 'open') AND bo.side = 'buy'",
+                        [_evt_slug],
+                    )
+                    if event_pending:
+                        return JSONResponse({"error": "Pending order already exists in this event"}, status_code=409)
+
                 # Get orderbook
                 ob = get_orderbook(token_id)
                 if ob is None:
@@ -849,16 +911,20 @@ def create_app() -> FastAPI:
                 # Sizing
                 portfolio = await get_bond_portfolio_state()
                 ask_depth = sum(l.get("size", 0) * l.get("price", 0) for l in ob.get("asks", []))
+                _synthetic = False
                 if ask_depth == 0 and best_ask > 0:
-                    ask_depth = best_ask * config.BOND_LIQUIDITY_SCALE * 0.1
+                    ask_depth = best_ask * config.BOND_LIQUIDITY_SCALE * config.BOND_SYNTHETIC_DEPTH_FACTOR
+                    _synthetic = True
 
-                # Get market end_date + meta in one query
-                mkt_rows = await aquery("SELECT end_date, meta FROM markets WHERE id = ?", [market_id])
+                # Get market end_date + meta + event_slug in one query
+                mkt_rows = await aquery("SELECT end_date, meta, event_slug FROM markets WHERE id = ?", [market_id])
                 now = datetime.now(timezone.utc)
                 days_remaining = config.BOND_DEFAULT_DAYS_REMAINING
                 neg_risk = False
+                event_slug = ""
                 if mkt_rows:
-                    end_raw, meta_raw = mkt_rows[0]
+                    end_raw, meta_raw, event_slug = mkt_rows[0]
+                    event_slug = event_slug or ""
                     if end_raw:
                         end_dt = ensure_utc(end_raw)
                         if end_dt:
@@ -878,6 +944,7 @@ def create_app() -> FastAPI:
                     days_remaining=days_remaining,
                     wins=_bond_wins, losses=_bond_losses,
                     fee_rate_bps=fee_bps, opp_score=MANUAL_TRADE_OPP_SCORE,
+                    synthetic_depth=_synthetic,
                 )
                 if size_usd < MIN_BUYABLE_USD:
                     return JSONResponse({"error": f"Computed size too small (${size_usd:.2f})"}, status_code=400)
@@ -918,8 +985,9 @@ def create_app() -> FastAPI:
                 except Exception:
                     pass
 
-                _opps_cache["ts"] = 0.0  # Invalidate opportunities cache after buy
-                _opps_cache["data"] = None
+                async with _opps_lock:
+                    _opps_cache["ts"] = 0.0  # Invalidate opportunities cache after buy
+                    _opps_cache["data"] = None
                 log.info("opportunity_buy_via_dashboard", market_id=market_id, outcome=outcome, price=order_price, size=size_usd)
                 return JSONResponse({"ok": True, "order_id": clob_order_id, "price": order_price, "size_usd": size_usd, "shares": shares})
             except ValueError as exc:
@@ -974,10 +1042,11 @@ def create_app() -> FastAPI:
                 return JSONResponse({"error": "Market not in watchlist"}, status_code=403)
 
             # Get market meta for token IDs
-            meta_rows = await aquery("SELECT meta, condition_id FROM markets WHERE id = ?", [market_id])
+            meta_rows = await aquery("SELECT meta, condition_id, end_date, event_slug FROM markets WHERE id = ?", [market_id])
             if not meta_rows:
                 return JSONResponse({"error": "Market not found"}, status_code=404)
-            meta_str, condition_id = meta_rows[0]
+            meta_str, condition_id, mkt_end_date, _evt_slug = meta_rows[0]
+            _evt_slug = _evt_slug or ""
             token_ids = _parse_token_ids(meta_str)
             if len(token_ids) < 2:
                 return JSONResponse({"error": "No token IDs for market"}, status_code=400)
@@ -987,11 +1056,12 @@ def create_app() -> FastAPI:
 
             # Check for existing position or pending order
             existing = await aquery(
-                "SELECT id FROM bond_positions WHERE market_id = ? AND token_id = ? AND status = 'open'",
+                "SELECT id, status FROM bond_positions WHERE market_id = ? AND token_id = ? AND status IN ('open', 'exiting')",
                 [market_id, token_id],
             )
             if existing:
-                return JSONResponse({"error": f"Already have open {side} position"}, status_code=409)
+                pos_status = existing[0][1]
+                return JSONResponse({"error": f"Already have {pos_status} {side} position"}, status_code=409)
 
             pending = await aquery(
                 "SELECT id FROM bond_orders WHERE market_id = ? AND token_id = ? AND status IN ('pending', 'open')",
@@ -999,6 +1069,34 @@ def create_app() -> FastAPI:
             )
             if pending:
                 return JSONResponse({"error": f"Pending order already exists for {side}"}, status_code=409)
+
+            # Check for position on opposite side of same market
+            opp_side = await aquery(
+                "SELECT id FROM bond_positions "
+                "WHERE market_id = ? AND token_id != ? AND status IN ('open', 'exiting')",
+                [market_id, token_id],
+            )
+            if opp_side:
+                return JSONResponse({"error": "Already have a position in this market (opposite side)"}, status_code=409)
+
+            # Check for position or pending order in same event
+            if _evt_slug:
+                event_pos = await aquery(
+                    "SELECT bp.id FROM bond_positions bp "
+                    "JOIN markets m ON bp.market_id = m.id "
+                    "WHERE m.event_slug = ? AND bp.status IN ('open', 'exiting')",
+                    [_evt_slug],
+                )
+                if event_pos:
+                    return JSONResponse({"error": "Already have a position in this event"}, status_code=409)
+                event_pending = await aquery(
+                    "SELECT bo.id FROM bond_orders bo "
+                    "JOIN markets m ON bo.market_id = m.id "
+                    "WHERE m.event_slug = ? AND bo.status IN ('pending', 'open') AND bo.side = 'buy'",
+                    [_evt_slug],
+                )
+                if event_pending:
+                    return JSONResponse({"error": "Pending order already exists in this event"}, status_code=409)
 
             # Get orderbook
             ob = get_orderbook(token_id)
@@ -1015,15 +1113,16 @@ def create_app() -> FastAPI:
             # Sizing
             portfolio = await get_bond_portfolio_state()
             ask_depth = sum(l.get("size", 0) * l.get("price", 0) for l in ob.get("asks", []))
+            _synthetic = False
             if ask_depth == 0 and best_ask > 0:
-                ask_depth = best_ask * config.BOND_LIQUIDITY_SCALE * 0.1
+                ask_depth = best_ask * config.BOND_LIQUIDITY_SCALE * config.BOND_SYNTHETIC_DEPTH_FACTOR
+                _synthetic = True
 
-            # Get market end_date for days_remaining
-            date_rows = await aquery("SELECT end_date FROM markets WHERE id = ?", [market_id])
+            # Compute days_remaining from end_date fetched above
             now = datetime.now(timezone.utc)
-            days_remaining = config.BOND_DEFAULT_DAYS_REMAINING  # default
-            if date_rows and date_rows[0][0]:
-                end_dt = ensure_utc(date_rows[0][0])
+            days_remaining = config.BOND_DEFAULT_DAYS_REMAINING
+            if mkt_end_date:
+                end_dt = ensure_utc(mkt_end_date)
                 if end_dt:
                     days_remaining = max(1.0, (end_dt - now).total_seconds() / 86400)
 
@@ -1036,6 +1135,7 @@ def create_app() -> FastAPI:
                 days_remaining=days_remaining,
                 wins=_bond_wins, losses=_bond_losses,
                 fee_rate_bps=fee_bps, opp_score=MANUAL_TRADE_OPP_SCORE,
+                synthetic_depth=_synthetic,
             )
             if size_usd < MIN_BUYABLE_USD:
                 return JSONResponse({"error": f"Computed size too small (${size_usd:.2f})"}, status_code=400)
@@ -1086,8 +1186,9 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
 
-            _opps_cache["ts"] = 0.0  # Invalidate opportunities cache after buy
-            _opps_cache["data"] = None
+            async with _opps_lock:
+                _opps_cache["ts"] = 0.0  # Invalidate opportunities cache after buy
+                _opps_cache["data"] = None
             return JSONResponse({"ok": True, "order_id": clob_order_id, "price": order_price, "size_usd": size_usd})
         except Exception as exc:
             log.error("watchlist_buy_error", market_id=market_id, error=str(exc))

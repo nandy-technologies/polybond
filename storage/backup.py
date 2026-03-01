@@ -39,10 +39,25 @@ def create_backup() -> Path | None:
         return None
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Pre-flight disk-space check — prevent the disk-full corruption that wiped the DB
+    try:
+        db_size = db_path.stat().st_size
+        disk_usage = shutil.disk_usage(str(BACKUP_DIR))
+        required = db_size * 2  # need space for .tmp copy + final rename
+        if disk_usage.free < required:
+            log.error("backup_skipped_disk_full",
+                      free_mb=f"{disk_usage.free / 1e6:.0f}",
+                      required_mb=f"{required / 1e6:.0f}",
+                      db_mb=f"{db_size / 1e6:.0f}")
+            return None
+    except Exception as exc:
+        log.warning("backup_disk_check_failed", error=str(exc))
+
     dest = BACKUP_DIR / _backup_filename()
 
     try:
-        # Flush WAL and copy atomically under DB lock to ensure consistent backup
+        # Flush WAL under DB lock, then copy outside lock (file is consistent after CHECKPOINT)
         from storage.db import get_conn, _db_lock
         with _db_lock:
             try:
@@ -51,9 +66,9 @@ def create_backup() -> Path | None:
             except Exception as exc:
                 log.warning("checkpoint_before_backup_failed", error=str(exc))
                 return None  # Don't copy a potentially inconsistent DB
-            tmp_dest = dest.with_suffix(".tmp")
-            shutil.copy2(str(db_path), str(tmp_dest))
-            os.rename(str(tmp_dest), str(dest))
+        tmp_dest = dest.with_suffix(".tmp")
+        shutil.copy2(str(db_path), str(tmp_dest))
+        os.rename(str(tmp_dest), str(dest))
         log.info("backup_created", path=str(dest), size_mb=f"{dest.stat().st_size / 1e6:.1f}")
     except Exception as exc:
         log.error("backup_failed", error=str(exc))
@@ -81,40 +96,47 @@ def get_latest_backup() -> Path | None:
 
 
 def restore_from_backup() -> bool:
-    """Try to restore DB from latest backup. Returns True on success."""
-    latest = get_latest_backup()
-    if not latest:
+    """Try to restore DB from backups, newest to oldest. Returns True on success."""
+    if not BACKUP_DIR.exists():
+        log.warning("no_backup_dir")
+        return False
+
+    backups = sorted(BACKUP_DIR.glob("polymarket-*.duckdb"), reverse=True)
+    if not backups:
         log.warning("no_backup_available")
         return False
 
     db_path = Path(config.DUCKDB_PATH)
-    try:
-        # Copy backup to temp path first, then swap atomically
-        tmp_path = db_path.with_suffix(".restore_tmp")
-        shutil.copy2(str(latest), str(tmp_path))
+    tmp_path = db_path.with_suffix(".restore_tmp")
 
-        # Verify the backup opens cleanly
-        import duckdb
-        test_conn = duckdb.connect(str(tmp_path), read_only=True)
-        test_conn.execute("SELECT 1")
-        test_conn.close()
-
-        # Remove corrupt DB + WAL files
-        db_path.unlink(missing_ok=True)
-        for wal in db_path.parent.glob(f"{db_path.name}.*"):
-            wal.unlink(missing_ok=True)
-
-        os.rename(str(tmp_path), str(db_path))
-        log.info("backup_restored", from_backup=str(latest))
-        return True
-    except Exception as exc:
-        log.error("backup_restore_failed", error=str(exc))
-        # Clean up temp file on failure
+    for candidate in backups:
+        log.info("trying_backup", path=str(candidate), size_mb=f"{candidate.stat().st_size / 1e6:.0f}")
         try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return False
+            shutil.copy2(str(candidate), str(tmp_path))
+
+            # Verify the backup opens cleanly
+            import duckdb
+            test_conn = duckdb.connect(str(tmp_path), read_only=True)
+            test_conn.execute("SELECT 1")
+            test_conn.close()
+
+            # Remove corrupt DB + WAL files
+            db_path.unlink(missing_ok=True)
+            for wal in db_path.parent.glob(f"{db_path.name}.*"):
+                wal.unlink(missing_ok=True)
+
+            os.rename(str(tmp_path), str(db_path))
+            log.info("backup_restored", from_backup=str(candidate))
+            return True
+        except Exception as exc:
+            log.warning("backup_restore_failed", path=str(candidate), error=str(exc))
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    log.error("all_backups_exhausted", tried=len(backups))
+    return False
 
 
 def maybe_backup() -> None:

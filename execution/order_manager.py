@@ -266,7 +266,7 @@ async def track_order_fills() -> None:
     try:
         stale_exits = await aquery(
             f"""
-            SELECT bp.id, bp.token_id, bp.shares, bo.clob_order_id, bp.market_id
+            SELECT bp.id, bp.token_id, bp.shares, bo.clob_order_id, bp.market_id, bp.outcome
             FROM bond_positions bp
             JOIN bond_orders bo ON bp.market_id = bo.market_id AND bp.token_id = bo.token_id
             WHERE bp.status = 'exiting'
@@ -276,7 +276,7 @@ async def track_order_fills() -> None:
             QUALIFY ROW_NUMBER() OVER (PARTITION BY bp.id ORDER BY bo.created_at) = 1
             """
         )
-        for pos_id, token_id, shares, clob_id, market_id in stale_exits:
+        for pos_id, token_id, shares, clob_id, market_id, outcome in stale_exits:
             try:
                 from execution.clob_client import cancel_order, place_market_sell, get_neg_risk, get_order_status
                 # Check if the limit sell was actually filled before escalating
@@ -304,11 +304,12 @@ async def track_order_fills() -> None:
                     if market_clob_id:
                         await aexecute(
                             """
-                            INSERT INTO bond_orders (market_id, token_id, clob_order_id, price, size, shares, status, side)
-                            VALUES (?, ?, ?, 0, 0, ?, 'open', 'sell')
+                            INSERT INTO bond_orders (market_id, token_id, outcome, clob_order_id, price, size, shares, status, side)
+                            VALUES (?, ?, ?, ?, 0, 0, ?, 'open', 'sell')
                             """,
-                            [market_id, token_id, market_clob_id, shares],
+                            [market_id, token_id, outcome, market_clob_id, shares],
                         )
+                        _open_order_tokens.add(token_id)
                     log.info("bond_exit_escalated_to_market", pos_id=pos_id, shares=shares)
                 except Exception as sell_exc:
                     # Market sell failed after cancelling limit sell — revert to 'open'
@@ -374,14 +375,17 @@ async def _create_or_update_position(
                 # Preserve 'exiting' status if already exiting (live sell still on exchange)
                 new_status = 'exiting' if current_pos_status == 'exiting' else 'open'
                 remaining_cost = entry_price * remaining_shares
+                remaining_unrealized = (fill_price - entry_price) * remaining_shares
                 await aexecute(
                     """
                     UPDATE bond_positions
                     SET shares = ?, cost_basis = ?, realized_pnl = COALESCE(realized_pnl, 0) + ?,
-                        current_price = ?, status = ?, updated_at = current_timestamp
+                        current_price = ?, status = ?, unrealized_pnl = ?,
+                        updated_at = current_timestamp
                     WHERE id = ?
                     """,
-                    [remaining_shares, remaining_cost, realized_pnl, fill_price, new_status, pos_id],
+                    [remaining_shares, remaining_cost, realized_pnl, fill_price, new_status,
+                     remaining_unrealized, pos_id],
                 )
                 log.info("position_partially_sold", pos_id=pos_id, sold=filled_shares,
                          remaining=remaining_shares, realized_pnl=f"{realized_pnl:.2f}")
@@ -408,9 +412,9 @@ async def _create_or_update_position(
 
     cost_basis = fill_price * shares
 
-    # Check if position already exists (could be adding to existing)
+    # Check if position already exists (could be adding to existing, or fill during exit)
     existing = await aquery(
-        "SELECT id, shares, cost_basis FROM bond_positions WHERE market_id = ? AND token_id = ? AND status = 'open'",
+        "SELECT id, shares, cost_basis FROM bond_positions WHERE market_id = ? AND token_id = ? AND status IN ('open', 'exiting')",
         [market_id, token_id],
     )
 
@@ -491,6 +495,26 @@ async def update_position_mtm() -> None:
                 [current_price, unrealized_pnl, pos_id],
             )
 
+            # Sync end_date from markets table (market dates can change)
+            try:
+                mkt_rows = await aquery("SELECT end_date FROM markets WHERE id = ?", [market_id])
+                if mkt_rows and mkt_rows[0][0]:
+                    mkt_end = ensure_utc(mkt_rows[0][0])
+                    pos_end = ensure_utc(end_date) if end_date else None
+                    if mkt_end and mkt_end != pos_end:
+                        new_yield = 0.0
+                        if entry_price > 0 and entry_price < 1 and mkt_end > datetime.now(timezone.utc):
+                            days_rem = max(0.01, (mkt_end - datetime.now(timezone.utc)).total_seconds() / 86400)
+                            raw_yield = (1.0 - entry_price) / entry_price
+                            new_yield = raw_yield * (365.0 / days_rem)
+                        await aexecute(
+                            "UPDATE bond_positions SET end_date = ?, annualized_yield = ?, updated_at = current_timestamp WHERE id = ?",
+                            [mkt_end.isoformat(), new_yield, pos_id],
+                        )
+                        log.info("position_end_date_synced", pos_id=pos_id, old_end=str(pos_end), new_end=str(mkt_end), new_yield=f"{new_yield:.1f}%")
+            except Exception as exc:
+                log.warning("end_date_sync_error", pos_id=pos_id, market_id=market_id, error=str(exc))
+
             # Edge check only for 'open' positions (exiting ones already have a sell placed)
             if pos_status != 'open':
                 continue
@@ -505,11 +529,12 @@ async def update_position_mtm() -> None:
             # At 0.80 entry: max gain = 25%, stop = 50% (capped at BOND_STOP_LOSS_PCT)
             _dynamic_stop = min(config.BOND_STOP_LOSS_PCT, ((1.0 - entry_price) / entry_price) * config.BOND_STOP_LOSS_K)
             loss_pct = (entry_price - current_price) / entry_price if entry_price > 0 else 0
+            _force_exit = False
             if loss_pct > _dynamic_stop:
                 log.warning("bond_stop_loss_triggered", pos_id=pos_id, loss_pct=f"{loss_pct:.2%}",
                             dynamic_stop=f"{_dynamic_stop:.2%}", entry=f"{entry_price:.3f}", current=f"{current_price:.3f}")
-                # Force immediate exit via edge check (set edge to trigger auto-exit)
                 edge = -999.0
+                _force_exit = True  # bypass severity gate — stop-loss must always exit
 
             if edge <= 0:
                 # Edge gone — severity relative to max possible gain, not cost basis
@@ -536,9 +561,9 @@ async def update_position_mtm() -> None:
                     except Exception:
                         pass
 
-                # Auto-exit if severity exceeds threshold
+                # Auto-exit if severity exceeds threshold (or stop-loss forces exit)
                 _did_exit = False
-                if severity > _exit_threshold:
+                if _force_exit or severity > _exit_threshold:
                     try:
                         # Fix #5: serialize exit order placement - check and insert in single transaction
                         # Guard: skip if a sell order already exists for this position
@@ -551,6 +576,9 @@ async def update_position_mtm() -> None:
                             tick_size = await get_tick_size(token_id)
                             neg_risk = await get_neg_risk(token_id)
                             best_bid = ob.get("best_bid", 0)
+                            if shares < config.POLYMARKET_MIN_SHARES:
+                                log.info("skip_auto_exit_dust", pos_id=pos_id, shares=shares)
+                                continue
                             if best_bid > 0 and shares > 0:
                                 # Update position to 'exiting' BEFORE placing order to prevent race
                                 rows_updated = await aquery(
@@ -589,6 +617,7 @@ async def update_position_mtm() -> None:
                                         """,
                                         [market_id, token_id, outcome, clob_sell_id, best_bid, best_bid * shares, shares],
                                     )
+                                    _open_order_tokens.add(token_id)
                                 _did_exit = True
                                 log.info(
                                     "bond_auto_exit",
@@ -599,6 +628,14 @@ async def update_position_mtm() -> None:
                                     order_id=sell_result.get("id", "?"),
                                 )
                     except Exception as exit_exc:
+                        # Revert position so next MTM cycle can retry exit
+                        try:
+                            await aexecute(
+                                "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE id = ? AND status = 'exiting'",
+                                [pos_id],
+                            )
+                        except Exception:
+                            pass
                         log.warning("bond_auto_exit_failed", pos_id=pos_id, error=str(exit_exc))
 
                 # Send alert if significant (always, even if sell already exists)
@@ -711,9 +748,6 @@ async def check_resolutions() -> None:
                 except Exception as exc:
                     log.warning("redeem_after_resolution_failed", pos_id=pos_id, error=str(exc))
 
-            # Refresh win/loss from DB (single source of truth)
-            await scanner.reload_bond_stats()
-
             log.info(
                 "bond_resolved",
                 pos_id=pos_id,
@@ -745,6 +779,13 @@ async def check_resolutions() -> None:
 
         except Exception as exc:
             log.error("resolution_check_error", pos_id=pos_id, error=str(exc))
+
+    # Refresh win/loss stats once after all resolutions
+    if rows:
+        try:
+            await scanner.reload_bond_stats()
+        except Exception:
+            pass
 
     # Short-window win rate alert
     try:
@@ -900,45 +941,52 @@ async def reconcile_orders() -> None:
             if not clob_id or clob_id in exchange_ids:
                 continue
 
-            # Order not on exchange — check if it was filled before marking cancelled
+            # Guard: skip if WS fill handler or polling is already processing this order
+            if db_id in _processing_orders:
+                continue
+            _processing_orders.add(db_id)
             try:
-                status_info = await get_order_status(clob_id)
-                actual_status = status_info.get("status", "").lower()
+                # Order not on exchange — check if it was filled before marking cancelled
+                try:
+                    status_info = await get_order_status(clob_id)
+                    actual_status = status_info.get("status", "").lower()
 
-                if actual_status in ("matched", "filled"):
-                    # Order was filled! Process the fill instead of cancelling
-                    fill_price = float(status_info.get("price", price))
-                    actual_shares = float(status_info.get("filled", 0))
-                    if actual_shares <= 0 and fill_price > 0:
-                        actual_shares = size / fill_price
-                    elif actual_shares <= 0:
-                        actual_shares = shares
+                    if actual_status in ("matched", "filled"):
+                        # Order was filled! Process the fill instead of cancelling
+                        fill_price = float(status_info.get("price", price))
+                        actual_shares = float(status_info.get("filled", 0))
+                        if actual_shares <= 0 and fill_price > 0:
+                            actual_shares = size / fill_price
+                        elif actual_shares <= 0:
+                            actual_shares = shares
 
-                    await aexecute(
-                        "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
-                        [fill_price, db_id],
-                    )
-                    await _create_or_update_position(
-                        market_id=market_id, token_id=token_id, outcome=outcome,
-                        fill_price=fill_price, shares=actual_shares, size=size,
-                        side=order_side or "buy",
-                    )
-                    filled_count += 1
-                    log.info("reconciled_filled_order", db_id=db_id, clob_id=clob_id,
-                             price=fill_price, shares=actual_shares)
-                    continue
-            except Exception as exc:
-                log.warning("reconcile_status_check_failed", db_id=db_id, clob_id=clob_id, error=str(exc))
-                continue  # Skip this order — will retry next cycle
+                        await aexecute(
+                            "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
+                            [fill_price, db_id],
+                        )
+                        await _create_or_update_position(
+                            market_id=market_id, token_id=token_id, outcome=outcome,
+                            fill_price=fill_price, shares=actual_shares, size=size,
+                            side=order_side or "buy",
+                        )
+                        filled_count += 1
+                        log.info("reconciled_filled_order", db_id=db_id, clob_id=clob_id,
+                                 price=fill_price, shares=actual_shares)
+                        continue
+                except Exception as exc:
+                    log.warning("reconcile_status_check_failed", db_id=db_id, clob_id=clob_id, error=str(exc))
+                    continue  # Skip this order — will retry next cycle
 
-            await aexecute(
-                "UPDATE bond_orders SET status = 'cancelled', updated_at = current_timestamp WHERE id = ?",
-                [db_id],
-            )
-            if order_side == "sell":
-                await _revert_exiting_if_no_sells(market_id, token_id)
-            stale_count += 1
-            log.info("reconciled_stale_order", db_id=db_id, clob_id=clob_id)
+                await aexecute(
+                    "UPDATE bond_orders SET status = 'cancelled', updated_at = current_timestamp WHERE id = ?",
+                    [db_id],
+                )
+                if order_side == "sell":
+                    await _revert_exiting_if_no_sells(market_id, token_id)
+                stale_count += 1
+                log.info("reconciled_stale_order", db_id=db_id, clob_id=clob_id)
+            finally:
+                _processing_orders.discard(db_id)
 
         if stale_count > 0 or filled_count > 0:
             log.info("reconciliation_complete", stale_cancelled=stale_count, fills_recovered=filled_count)
@@ -971,7 +1019,7 @@ async def cleanup_stale_orders() -> None:
             WHERE bo.status IN ('pending', 'open')
               AND (
                 bo.created_at < current_timestamp - INTERVAL '{timeout_hours} hours'
-                OR (m.end_date IS NOT NULL AND m.end_date < current_timestamp + INTERVAL '1 hour')
+                OR (bo.side = 'buy' AND m.end_date IS NOT NULL AND m.end_date < current_timestamp + INTERVAL '1 hour')
               )
             """
         )

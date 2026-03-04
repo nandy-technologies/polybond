@@ -293,11 +293,10 @@ MIT License - see LICENSE file for details
 
 For issues, questions, or contributions:
 - GitHub Issues: https://github.com/nandy-technologies/polybond/issues
-- Email: support@nandy.io
 
 ## Credits
 
-Built by Nandy Technologies using:
+Built using:
 - [py-clob-client](https://github.com/Polymarket/py-clob-client): Polymarket CLOB SDK
 - [DuckDB](https://duckdb.org): Embedded analytical database
 - [FastAPI](https://fastapi.tiangolo.com): Web dashboard framework

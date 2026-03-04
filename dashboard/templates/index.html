@@ -15,37 +15,8 @@
 </head>
 <body class="bal-hidden">
 <nav id="nandy-nav">
-  <a class="nn-brand" href="/"><img class="nn-logo" src="/static/tribal-logo-transparent.png" alt="Nandy"></a>
-  <script>(function(){
-    var h=location.hostname,tk=new URLSearchParams(location.search).get('token'),qs=tk?'?token='+encodeURIComponent(tk):'';
-    document.querySelector('.nn-brand').href='//'+h+':9090/'+qs;
-    var n=document.getElementById('nandy-nav');
-    var ls=[['Universe',9090],['HYPE Bot',8082],['Polybonds',8083]];
-    ls.forEach(function(d){
-      var a=document.createElement('a');a.className='nn-link';
-      a.href='//'+h+':'+d[1]+'/'+qs;a.textContent=d[0];
-      if(location.port==d[1])a.classList.add('nn-active');
-      n.appendChild(a);
-    });
-    var dd=document.createElement('div');dd.className='nn-dropdown';
-    var games=[['Tide Pools',8084]];
-    var isGA=games.some(function(g){return location.port==g[1]});
-    var tog=document.createElement('button');
-    tog.className='nn-dropdown-toggle'+(isGA?' nn-active':'');
-    tog.innerHTML='Games <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg>';
-    dd.appendChild(tog);
-    var mn=document.createElement('div');mn.className='nn-dropdown-menu';
-    games.forEach(function(g){
-      var a=document.createElement('a');a.href='//'+h+':'+g[1]+'/'+qs;a.textContent=g[0];
-      if(location.port==g[1])a.classList.add('nn-active');mn.appendChild(a);
-    });
-    dd.appendChild(mn);n.appendChild(dd);
-    var ws=document.createElement('a');ws.className='nn-link';
-    ws.href='https://nandytech.net';ws.target='_blank';ws.rel='noopener noreferrer';ws.textContent='Website';
-    ws.style.marginLeft='auto';n.appendChild(ws);
-    tog.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open')});
-    document.addEventListener('click',function(){dd.classList.remove('open')});
-  })();</script>
+  <a class="nn-brand" href="/"><img class="nn-logo" src="/static/tribal-logo-transparent.png" alt="Polybonds"></a>
+  <a class="nn-link nn-active" href="/">Polybonds</a>
 </nav>
 
   <div id="trading-paused-banner">TRADING PAUSED &mdash; Bot is not placing new orders</div>
@@ -543,8 +514,7 @@
 
   <footer>
     <span>{{ uptime }}</span> &middot;
-    <span id="footer-rendered">Data as of {{ rendered_at_et }}</span> &middot;
-    <a href="https://nandytech.net" target="_blank" rel="noopener noreferrer">Nandy Universe</a>
+    <span id="footer-rendered">Data as of {{ rendered_at_et }}</span>
   </footer>
 
   <div class="confirm-overlay" id="generic-confirm-overlay" role="dialog" aria-modal="true">

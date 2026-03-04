@@ -103,16 +103,10 @@ def _attempt_recovery() -> None:
     # Phase 3: nuke and recreate as ABSOLUTE last resort
     # This destroys all position and order history — require explicit opt-in
     if not config.ALLOW_DB_NUKE:
-        log.critical("duckdb_nuke_refused — set ALLOW_DB_NUKE=true to permit; bot halting")
-        try:
-            from alerts.notifier import send_imsg
-            import asyncio
-            asyncio.run(send_imsg(
-                "CRITICAL: DB corrupt, all backups failed, ALLOW_DB_NUKE=false. "
-                "Bot halted. Manual intervention required."
-            ))
-        except Exception:
-            pass
+        # Note: this runs in a thread-pool worker (via asyncio.to_thread), so
+        # asyncio.run() would create an isolated loop without proxy/session config.
+        # Just log critically — the log file is the reliable notification path.
+        log.critical("duckdb_nuke_refused", hint="set ALLOW_DB_NUKE=true to permit; bot halting")
         import sys
         sys.exit(2)
 
@@ -290,8 +284,8 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
      "CREATE INDEX IF NOT EXISTS idx_bond_orders_created ON bond_orders(created_at)"),
     (12, "Add redeemed_tx to bond_positions for on-chain redemption tracking",
      "ALTER TABLE bond_positions ADD COLUMN redeemed_tx VARCHAR"),
-    (13, "Add unique partial index on bond_positions to prevent duplicate open positions",
-     "CREATE UNIQUE INDEX IF NOT EXISTS idx_bond_positions_unique_open ON bond_positions(market_id, token_id) WHERE status IN ('open', 'exiting')"),
+    (13, "Dedup protection handled at application level (DuckDB lacks partial indexes)",
+     "SELECT 1"),
 ]
 
 
@@ -393,7 +387,7 @@ async def aquery(sql: str, params: list | None = None) -> list[tuple]:
         raise
 
 
-async def prune_bond_equity(keep_days: int = 90) -> None:
+async def prune_bond_equity(keep_days: int = config.BOND_EQUITY_RETENTION_DAYS) -> None:
     """Delete bond_equity rows older than keep_days."""
     await aexecute(
         f"DELETE FROM bond_equity WHERE ts < current_timestamp - INTERVAL '{keep_days} days'",

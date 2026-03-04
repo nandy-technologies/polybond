@@ -43,10 +43,12 @@ def opportunity_score(
     se = spread_efficiency(spread, price)
 
     # Defense-in-depth: if spread > 20% of ask, market is too illiquid to trust
-    if price > 0 and spread / price > 0.20:
+    # Use floor instead of 0 to avoid zeroing the entire geometric score
+    # (which would negative-cache the market for up to 10 min on transient spreads)
+    if price > 0 and spread / price > config.BOND_SPREAD_SANITY_PCT:
         log.debug("spread_sanity_reject", spread=spread, price=price,
                   spread_pct=round(spread / price * 100, 1))
-        se = 0.0
+        se = config.BOND_SCORING_MIN_FLOOR
 
     # Weighted geometric mean: product(factor_i ^ weight_i) ^ (1 / sum_weights)
     w_yield = config.BOND_SCORE_WEIGHT_YIELD

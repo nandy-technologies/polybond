@@ -66,23 +66,27 @@ async def _maybe_discard_token(token_id: str) -> None:
 
 
 async def _revert_exiting_if_no_sells(market_id: str, token_id: str) -> None:
-    """Revert 'exiting' position to 'open' if no live sell orders remain."""
+    """Revert 'exiting' position to 'open' if no live sell orders remain.
+
+    Uses a single atomic UPDATE with subquery to avoid TOCTOU race where
+    a new sell could be inserted between a SELECT check and the UPDATE.
+    """
     try:
-        remaining_sells = await aquery(
-            "SELECT COUNT(*) FROM bond_orders WHERE market_id = ? AND token_id = ? AND side = 'sell' AND status IN ('pending', 'open')",
+        await aexecute(
+            """UPDATE bond_positions SET status = 'open', updated_at = current_timestamp
+               WHERE market_id = ? AND token_id = ? AND status = 'exiting'
+               AND (SELECT COUNT(*) FROM bond_orders
+                    WHERE market_id = ? AND token_id = ? AND side = 'sell'
+                    AND status IN ('pending', 'open')) = 0""",
+            [market_id, token_id, market_id, token_id],
+        )
+        # Check if a revert actually happened (DuckDB aexecute doesn't return rowcount)
+        check = await aquery(
+            "SELECT 1 FROM bond_positions WHERE market_id = ? AND token_id = ? AND status = 'open'",
             [market_id, token_id],
         )
-        if not remaining_sells or remaining_sells[0][0] == 0:
-            updated = await aquery(
-                "SELECT id FROM bond_positions WHERE market_id = ? AND token_id = ? AND status = 'exiting'",
-                [market_id, token_id],
-            )
-            if updated:
-                await aexecute(
-                    "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE market_id = ? AND token_id = ? AND status = 'exiting'",
-                    [market_id, token_id],
-                )
-                log.info("exiting_position_reverted", market_id=log_id(market_id), token_id=log_id(token_id))
+        if check:
+            log.info("exiting_position_reverted", market_id=log_id(market_id), token_id=log_id(token_id))
     except Exception as exc:
         log.debug("revert_exiting_check_failed", error=str(exc))
 
@@ -121,10 +125,11 @@ async def on_ws_trade(fill: dict) -> None:
             if new_status in ("matched", "filled"):
                 fill_price = float(status_info.get("price", price))
                 actual_shares = float(status_info.get("filled", 0))
-                if actual_shares <= 0 and fill_price > 0:
-                    actual_shares = size / fill_price
-                elif actual_shares <= 0:
-                    actual_shares = shares
+                if actual_shares <= 0:
+                    if size > 0 and fill_price > 0:
+                        actual_shares = size / fill_price
+                    else:
+                        actual_shares = shares  # market orders (size=0) use DB shares
 
                 await aexecute(
                     "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
@@ -215,11 +220,11 @@ async def track_order_fills() -> None:
             if new_status in ("matched", "filled"):
                 fill_price = float(status_info.get("price", price))
                 actual_shares = float(status_info.get("filled", 0))
-                # Fallback: if API reports 0 filled shares, recompute from size/fill_price
-                if actual_shares <= 0 and fill_price > 0:
-                    actual_shares = size / fill_price
-                elif actual_shares <= 0:
-                    actual_shares = shares
+                if actual_shares <= 0:
+                    if size > 0 and fill_price > 0:
+                        actual_shares = size / fill_price
+                    else:
+                        actual_shares = shares  # market orders (size=0) use DB shares
 
                 await aexecute(
                     "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
@@ -296,6 +301,15 @@ async def track_order_fills() -> None:
                     "UPDATE bond_orders SET status = 'cancelled', updated_at = current_timestamp WHERE clob_order_id = ?",
                     [clob_id],
                 )
+                # Re-query shares — a partial fill may have reduced them since our initial query
+                current_pos = await aquery(
+                    "SELECT shares FROM bond_positions WHERE id = ? AND status = 'exiting'",
+                    [pos_id],
+                )
+                if not current_pos or current_pos[0][0] <= 0:
+                    log.info("exit_escalation_position_gone", pos_id=pos_id)
+                    continue
+                shares = current_pos[0][0]
                 neg_risk = await get_neg_risk(token_id)
                 try:
                     market_result = await place_market_sell(token_id=token_id, shares=shares, neg_risk=neg_risk)
@@ -310,7 +324,14 @@ async def track_order_fills() -> None:
                             [market_id, token_id, outcome, market_clob_id, shares],
                         )
                         _open_order_tokens.add(token_id)
-                    log.info("bond_exit_escalated_to_market", pos_id=pos_id, shares=shares)
+                        log.info("bond_exit_escalated_to_market", pos_id=pos_id, shares=shares)
+                    else:
+                        # Market sell returned no order ID — revert to 'open' so next cycle retries
+                        await aexecute(
+                            "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE id = ?",
+                            [pos_id],
+                        )
+                        log.warning("bond_exit_escalation_no_id", pos_id=pos_id, result=str(market_result)[:200])
                 except Exception as sell_exc:
                     # Market sell failed after cancelling limit sell — revert to 'open'
                     # so the next MTM cycle can re-evaluate and try again
@@ -351,7 +372,7 @@ async def _create_or_update_position(
             pos_status_rows = await aquery("SELECT status FROM bond_positions WHERE id = ?", [pos_id])
             current_pos_status = pos_status_rows[0][0] if pos_status_rows else 'open'
 
-            if remaining_shares < 5.0:
+            if remaining_shares < config.POLYMARKET_MIN_SHARES:
                 # Fully closed (or dust remaining) — accumulate, don't overwrite
                 await aexecute(
                     """
@@ -618,15 +639,23 @@ async def update_position_mtm() -> None:
                                         [market_id, token_id, outcome, clob_sell_id, best_bid, best_bid * shares, shares],
                                     )
                                     _open_order_tokens.add(token_id)
-                                _did_exit = True
-                                log.info(
-                                    "bond_auto_exit",
-                                    pos_id=pos_id,
-                                    price=best_bid,
-                                    shares=shares,
-                                    severity=f"{severity:.2f}",
-                                    order_id=sell_result.get("id", "?"),
-                                )
+                                    _did_exit = True
+                                    log.info(
+                                        "bond_auto_exit",
+                                        pos_id=pos_id,
+                                        price=best_bid,
+                                        shares=shares,
+                                        severity=f"{severity:.2f}",
+                                        order_id=clob_sell_id,
+                                    )
+                                else:
+                                    # Sell rejected (e.g. post-only crossed) — revert so next MTM cycle retries
+                                    await aexecute(
+                                        "UPDATE bond_positions SET status = 'open', updated_at = current_timestamp WHERE id = ? AND status = 'exiting'",
+                                        [pos_id],
+                                    )
+                                    log.warning("auto_exit_sell_rejected", pos_id=pos_id,
+                                                sell_result=str(sell_result)[:200])
                     except Exception as exit_exc:
                         # Revert position so next MTM cycle can retry exit
                         try:
@@ -704,17 +733,8 @@ async def check_resolutions() -> None:
                 realized_pnl = -cost_basis
                 status = "resolved_loss"
 
-            await aexecute(
-                """
-                UPDATE bond_positions
-                SET status = ?, realized_pnl = COALESCE(realized_pnl, 0) + ?, unrealized_pnl = 0,
-                    current_price = ?, closed_at = current_timestamp
-                WHERE id = ?
-                """,
-                [status, realized_pnl, 1.0 if won else 0.0, pos_id],
-            )
-
-            # Cancel any live sell orders for this now-resolved position
+            # Cancel any live sell orders BEFORE marking resolved —
+            # prevents race where WS fill processes a sell after status change
             try:
                 from execution.clob_client import cancel_order
                 sell_orders = await aquery(
@@ -733,6 +753,16 @@ async def check_resolutions() -> None:
                     )
             except Exception:
                 pass
+
+            await aexecute(
+                """
+                UPDATE bond_positions
+                SET status = ?, realized_pnl = COALESCE(realized_pnl, 0) + ?, unrealized_pnl = 0,
+                    current_price = ?, closed_at = current_timestamp
+                WHERE id = ?
+                """,
+                [status, realized_pnl, 1.0 if won else 0.0, pos_id],
+            )
 
             # Redeem resolved shares on-chain for USDC.e
             redeem_tx = None
@@ -955,10 +985,11 @@ async def reconcile_orders() -> None:
                         # Order was filled! Process the fill instead of cancelling
                         fill_price = float(status_info.get("price", price))
                         actual_shares = float(status_info.get("filled", 0))
-                        if actual_shares <= 0 and fill_price > 0:
-                            actual_shares = size / fill_price
-                        elif actual_shares <= 0:
-                            actual_shares = shares
+                        if actual_shares <= 0:
+                            if size > 0 and fill_price > 0:
+                                actual_shares = size / fill_price
+                            else:
+                                actual_shares = shares  # market orders (size=0) use DB shares
 
                         await aexecute(
                             "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
@@ -972,6 +1003,11 @@ async def reconcile_orders() -> None:
                         filled_count += 1
                         log.info("reconciled_filled_order", db_id=db_id, clob_id=clob_id,
                                  price=fill_price, shares=actual_shares)
+                        continue
+
+                    # Only cancel if exchange explicitly says order is terminal
+                    if actual_status not in ("cancelled", "expired"):
+                        log.info("reconcile_skip_nonterminal", db_id=db_id, clob_id=clob_id, status=actual_status)
                         continue
                 except Exception as exc:
                     log.warning("reconcile_status_check_failed", db_id=db_id, clob_id=clob_id, error=str(exc))
@@ -1019,7 +1055,7 @@ async def cleanup_stale_orders() -> None:
             WHERE bo.status IN ('pending', 'open')
               AND (
                 bo.created_at < current_timestamp - INTERVAL '{timeout_hours} hours'
-                OR (bo.side = 'buy' AND m.end_date IS NOT NULL AND m.end_date < current_timestamp + INTERVAL '1 hour')
+                OR (bo.side = 'buy' AND m.end_date IS NOT NULL AND m.end_date < current_timestamp + INTERVAL '{config.BOND_PRE_CLOSE_CANCEL_HOURS} hours')
               )
             """
         )
@@ -1035,10 +1071,11 @@ async def cleanup_stale_orders() -> None:
                             # Order was filled — process fill instead of cancelling
                             fill_price = float(status_info.get("price", price))
                             actual_shares = float(status_info.get("filled", 0))
-                            if actual_shares <= 0 and fill_price > 0:
-                                actual_shares = size / fill_price
-                            elif actual_shares <= 0:
-                                actual_shares = shares
+                            if actual_shares <= 0:
+                                if size > 0 and fill_price > 0:
+                                    actual_shares = size / fill_price
+                                else:
+                                    actual_shares = shares  # market orders (size=0) use DB shares
                             await aexecute(
                                 "UPDATE bond_orders SET status = 'filled', fill_price = ?, fill_time = current_timestamp, updated_at = current_timestamp WHERE id = ?",
                                 [fill_price, order_id],
@@ -1126,7 +1163,7 @@ async def improve_stale_orders() -> None:
                 from feeds.clob_ws import get_orderbook
                 # Optimization #4: Use fresh WS data (<30s) for adaptive pricing
                 # Price improvement is time-sensitive, so we require fresh orderbook data
-                ob = get_orderbook(token_id, max_age=30)
+                ob = get_orderbook(token_id, max_age=config.BOND_OB_FRESH_AGE)
                 if ob is None:
                     continue
 
@@ -1161,7 +1198,7 @@ async def improve_stale_orders() -> None:
                         log.info("order_above_market_cancelled", order_id=order_id,
                                  old_price=f"{price:.4f}", best_ask=f"{best_ask:.4f}")
                     continue
-                elif new_price < price - tick_size * 2:
+                elif new_price < price - tick_size * config.BOND_PRICE_DRIFT_TICKS:
                     # Significant downward drift — cancel and let scanner re-evaluate
                     cancelled = await cancel_order(clob_id)
                     if cancelled:

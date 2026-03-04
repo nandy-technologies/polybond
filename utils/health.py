@@ -43,7 +43,8 @@ class HealthMonitor:
         if not self._checks:
             return dict(self._components)
         task_to_name = {asyncio.create_task(fn()): name for name, fn in self._checks.items()}
-        done, pending = await asyncio.wait(task_to_name.keys(), timeout=5.0)
+        import config
+        done, pending = await asyncio.wait(task_to_name.keys(), timeout=config.HEALTH_CHECK_TIMEOUT)
 
         for task in pending:
             task.cancel()

@@ -1,13 +1,36 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
-data/*.duckdb
-data/*.duckdb.wal
-.venv/
 *.egg-info/
 dist/
 build/
-logs/
+.venv/
+
+# Data (contains trade history, portfolio state, PII)
+data/*.duckdb
+data/*.duckdb.wal
 data/backups/
+data/polymarket-bot.pid
+
+# Logs
+logs/
 bot.log
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Serena (local AI config)
+.serena/

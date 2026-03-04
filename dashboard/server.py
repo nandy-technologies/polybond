@@ -671,6 +671,8 @@ def create_app() -> FastAPI:
         token_id = body.get("token_id")
         if not market_id or not token_id:
             return JSONResponse({"error": "Need market_id and token_id"}, status_code=400)
+        if not isinstance(market_id, str) or not isinstance(token_id, str):
+            return JSONResponse({"error": "market_id and token_id must be strings"}, status_code=400)
 
         # Per-market lock to prevent duplicate sell orders from double-clicks
         lock_key = f"close:{market_id}:{token_id}"
@@ -764,6 +766,8 @@ def create_app() -> FastAPI:
         clob_order_id = body.get("clob_order_id")
         if not order_id or not clob_order_id:
             return JSONResponse({"error": "Need order_id and clob_order_id"}, status_code=400)
+        if not isinstance(order_id, int) or not isinstance(clob_order_id, str):
+            return JSONResponse({"error": "order_id must be int, clob_order_id must be string"}, status_code=400)
 
         lock_key = f"cancel:{order_id}"
         async with _get_trade_lock(lock_key):
@@ -828,6 +832,8 @@ def create_app() -> FastAPI:
         outcome = body.get("outcome")
         if not market_id or not token_id or not outcome:
             return JSONResponse({"error": "Need market_id, token_id, and outcome"}, status_code=400)
+        if not isinstance(market_id, str) or not isinstance(token_id, str):
+            return JSONResponse({"error": "market_id and token_id must be strings"}, status_code=400)
         if outcome not in ("Yes", "No"):
             return JSONResponse({"error": "outcome must be 'Yes' or 'No'"}, status_code=400)
 

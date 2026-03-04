@@ -69,7 +69,7 @@ async def _run_clob_ws_orderbooks() -> None:
             return
         except Exception as exc:
             log.error("clob_ws_fatal", error=str(exc))
-            await asyncio.sleep(10)
+            await asyncio.sleep(config.TASK_RESTART_DELAY)
 
 
 async def _run_market_sync() -> None:
@@ -114,7 +114,7 @@ async def _run_dashboard() -> None:
             return
         except Exception as exc:
             log.error("dashboard_fatal", error=str(exc))
-            await asyncio.sleep(10)
+            await asyncio.sleep(config.TASK_RESTART_DELAY)
 
 
 _prev_health_status: Status | None = None
@@ -180,7 +180,7 @@ async def _run_bond_scanner() -> None:
         try:
             import random
             jitter = random.uniform(-config.BOND_SCAN_JITTER, config.BOND_SCAN_JITTER)
-            await asyncio.wait_for(_shutdown_event.wait(), timeout=max(60, config.BOND_SCAN_INTERVAL + jitter))
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=max(config.BOND_SCAN_MIN_INTERVAL, config.BOND_SCAN_INTERVAL + jitter))
             break
         except asyncio.TimeoutError:
             pass

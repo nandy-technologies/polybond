@@ -399,12 +399,12 @@ async def _fetch_event_tags(event_slugs: list[str]) -> dict[str, list[str]]:
     
     slug_to_tags: dict[str, list[str]] = {}
     offset = 0
-    page_size = 100
+    page_size = config.GAMMA_API_PAGE_SIZE
     target_slugs = set(event_slugs)
-    
-    # We'll fetch up to 10 pages (1000 events) to find our slugs
+
+    # We'll fetch up to max_pages pages to find our slugs
     # This should cover 99%+ of active events
-    max_pages = 10
+    max_pages = config.GAMMA_EVENT_TAG_MAX_PAGES
     
     for page_num in range(max_pages):
         url = f"{config.GAMMA_API_BASE}/events"
@@ -686,7 +686,7 @@ async def sync_top_markets() -> int:
         with _db_lock:
             try:
                 conn = get_conn()
-            except (duckdb.FatalException, duckdb.InternalException):
+            except (duckdb.FatalException, duckdb.InternalException, duckdb.ConnectionException):
                 _mark_conn_error()
                 raise
             try:
@@ -706,7 +706,7 @@ async def sync_top_markets() -> int:
                     conn = get_conn()
                     conn.execute(sql, params)
                     upserted += 1
-            except (duckdb.FatalException, duckdb.InternalException, duckdb.IOException):
+            except (duckdb.FatalException, duckdb.InternalException, duckdb.IOException, duckdb.ConnectionException):
                 _mark_conn_error()
                 raise
             except Exception as exc:

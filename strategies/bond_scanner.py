@@ -147,7 +147,7 @@ async def _refresh_rolling_kelly_stats() -> None:
             "ORDER BY closed_at DESC LIMIT ?",
             [config.BOND_KELLY_ROLLING_WINDOW],
         )
-        if rows and len(rows) >= 10:
+        if rows and len(rows) >= config.BOND_KELLY_MIN_ROLLING_TRADES:
             wins = sum(1 for (s, pnl) in rows if s == "resolved_win" or (s == "exited" and pnl >= 0))
             losses = sum(1 for (s, pnl) in rows if s == "resolved_loss" or (s == "exited" and pnl < 0))
             _rolling_wins = wins
@@ -175,9 +175,9 @@ async def _refresh_measured_exec_degradation() -> None:
             "SELECT price, fill_price FROM bond_orders "
             "WHERE status = 'filled' AND side = 'buy' "
             "AND fill_price IS NOT NULL AND fill_price > 0 AND price > 0 AND price < 1 "
-            "ORDER BY fill_time DESC LIMIT 50"
+            f"ORDER BY fill_time DESC LIMIT {config.BOND_EXEC_DEG_SAMPLE_SIZE}"
         )
-        if rows and len(rows) >= 5:
+        if rows and len(rows) >= config.BOND_EXEC_DEG_MIN_SAMPLES:
             degradations = []
             for order_price, fill_price in rows:
                 edge = 1.0 - order_price
@@ -187,7 +187,7 @@ async def _refresh_measured_exec_degradation() -> None:
             if degradations:
                 avg_deg = sum(degradations) / len(degradations)
                 # Clamp to reasonable range and blend with config default for stability
-                avg_deg = min(avg_deg, 0.10)  # Cap at 10%
+                avg_deg = min(avg_deg, config.BOND_EXEC_DEG_MAX_CAP)
                 _measured_exec_degradation = avg_deg
                 log.info("measured_exec_degradation", value=f"{avg_deg:.4f}", samples=len(degradations))
                 return
@@ -398,8 +398,8 @@ async def scan_bond_candidates() -> list[dict]:
     # Compute portfolio-proportional scales for scoring
     _portfolio_for_scales = await get_bond_portfolio_state()
     _equity = max(_portfolio_for_scales.get("equity", 0), 1.0)
-    _volume_scale = min(config.BOND_VOLUME_SCALE, max(1000, _equity * 50))
-    _liquidity_scale = min(config.BOND_LIQUIDITY_SCALE, max(100, _equity * 5))
+    _volume_scale = min(config.BOND_VOLUME_SCALE, max(config.BOND_VOLUME_SCALE_FLOOR, _equity * config.BOND_VOLUME_SCALE_MULT))
+    _liquidity_scale = min(config.BOND_LIQUIDITY_SCALE, max(config.BOND_LIQUIDITY_SCALE_FLOOR, _equity * config.BOND_LIQUIDITY_SCALE_MULT))
     log.info("scoring_scales", equity=f"{_equity:.2f}",
              volume_scale=f"{_volume_scale:.0f}", liquidity_scale=f"{_liquidity_scale:.0f}")
 
@@ -716,7 +716,7 @@ async def _query_rolling_limits() -> tuple[int, float]:
     try:
         rows = await aquery(
             "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM bond_orders "
-            "WHERE created_at >= current_timestamp - INTERVAL '24 hours' "
+            f"WHERE created_at >= current_timestamp - INTERVAL '{config.BOND_ROLLING_STATS_HOURS} hours' "
             "AND status != 'cancelled' AND side = 'buy'"
         )
         if rows:
@@ -768,7 +768,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
             )
         except Exception:
             pass
-    elif _circuit_breaker_active and equity > _peak_equity * config.BOND_HALT_RECOVERY_PCT and equity < _peak_equity:
+    elif _circuit_breaker_active and equity > _peak_equity * config.BOND_HALT_RECOVERY_PCT and equity <= _peak_equity:
         # Recovery: equity is above recovery threshold but below old peak.
         # Reset peak to current equity so the drawdown breaker uses the
         # recovered level as baseline, allowing trading to resume.
@@ -848,7 +848,7 @@ async def _execute_bond_buys_inner(candidates: list[dict]) -> int:
         order_rows = await aquery(
             "SELECT market_id, token_id FROM bond_orders "
             "WHERE status IN ('pending', 'open') "
-            "OR (side = 'buy' AND status = 'cancelled' AND created_at >= current_timestamp - INTERVAL '30 minutes')"
+            f"OR (side = 'buy' AND status = 'cancelled' AND created_at >= current_timestamp - INTERVAL '{config.BOND_CANCEL_DEDUP_MINS} minutes')"
         )
         pending_orders = {(r[0], r[1]) for r in order_rows}
     except Exception:

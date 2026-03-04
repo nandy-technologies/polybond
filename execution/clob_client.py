@@ -225,7 +225,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
             f"&amount={balance}&srcDecimals=6&destDecimals=6&side=SELL&network={config.POLYGON_CHAIN_ID}"
         )
         req = urllib.request.Request(price_url, headers={"Accept": "application/json"})
-        resp = urllib.request.urlopen(req, timeout=15)
+        resp = urllib.request.urlopen(req, timeout=config.PARASWAP_API_TIMEOUT)
         price_data = json.loads(resp.read())
         price_route = price_data["priceRoute"]
 
@@ -252,7 +252,7 @@ def _swap_native_usdc_to_usdc_e() -> float:
             f"{config.PARASWAP_API_BASE}/transactions/{config.POLYGON_CHAIN_ID}?ignoreChecks=true",
             data=tx_body, headers={"Content-Type": "application/json"},
         )
-        tx_resp = urllib.request.urlopen(tx_req, timeout=15)
+        tx_resp = urllib.request.urlopen(tx_req, timeout=config.PARASWAP_API_TIMEOUT)
         tx_data = json.loads(tx_resp.read())
 
         # Submit on-chain immediately
@@ -667,7 +667,7 @@ async def redeem_positions(condition_id: str, neg_risk: bool = False) -> str | N
         return tx_hash.hex()
 
     try:
-        result = await _to_thread_with_timeout(_redeem, timeout=30)
+        result = await _to_thread_with_timeout(_redeem, timeout=config.CLOB_API_TIMEOUT)
         if result:
             log.info("positions_redeemed", condition_id=log_id(condition_id), tx=result)
             invalidate_balance_cache()
@@ -1136,8 +1136,8 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
             asks = [{"price": float(a.price), "size": float(a.size)} for a in result.asks]
 
         # Sort BEFORE extracting best bid/ask — CLOB API returns unsorted
-        bids = sorted(bids, key=lambda x: x["price"], reverse=True)[:10]
-        asks = sorted(asks, key=lambda x: x["price"])[:10]
+        bids = sorted(bids, key=lambda x: x["price"], reverse=True)[:config.ORDERBOOK_DEPTH_LEVELS]
+        asks = sorted(asks, key=lambda x: x["price"])[:config.ORDERBOOK_DEPTH_LEVELS]
         best_bid = bids[0]["price"] if bids else 0.0
         best_ask = asks[0]["price"] if asks else 0.0
         spread = best_ask - best_bid
@@ -1152,8 +1152,8 @@ async def get_orderbook_rest(token_id: str) -> dict | None:
             "best_ask": best_ask,
             "spread": round(spread, 4),
             "mid_price": round(mid_price, 4),
-            "ask_depth": round(sum(a["price"] * a["size"] for a in sorted(asks, key=lambda x: x["price"])[:10]), 2),
-            "bid_depth": round(sum(b["price"] * b["size"] for b in sorted(bids, key=lambda x: x["price"], reverse=True)[:10]), 2),
+            "ask_depth": round(sum(a["price"] * a["size"] for a in sorted(asks, key=lambda x: x["price"])[:config.ORDERBOOK_DEPTH_LEVELS]), 2),
+            "bid_depth": round(sum(b["price"] * b["size"] for b in sorted(bids, key=lambda x: x["price"], reverse=True)[:config.ORDERBOOK_DEPTH_LEVELS]), 2),
             "ts": __import__("time").time(),
         }
     except Exception as exc:

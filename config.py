@@ -282,3 +282,29 @@ BOND_REDEEM_RETRY_CYCLES: int = int(os.getenv("BOND_REDEEM_RETRY_CYCLES", "10"))
 
 # -- USDC native address (Polygon) --------------------------------------------
 USDC_NATIVE_ADDRESS: str = os.getenv("USDC_NATIVE_ADDRESS", "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+
+# -- Execution tuning ---------------------------------------------------------
+PARASWAP_API_TIMEOUT: float = float(os.getenv("PARASWAP_API_TIMEOUT", "15"))
+ORDERBOOK_DEPTH_LEVELS: int = int(os.getenv("ORDERBOOK_DEPTH_LEVELS", "10"))
+
+# -- Bond strategy tuning -----------------------------------------------------
+BOND_SPREAD_SANITY_PCT: float = float(os.getenv("BOND_SPREAD_SANITY_PCT", "0.20"))
+BOND_PRE_CLOSE_CANCEL_HOURS: int = int(os.getenv("BOND_PRE_CLOSE_CANCEL_HOURS", "1"))
+BOND_PRICE_DRIFT_TICKS: int = int(os.getenv("BOND_PRICE_DRIFT_TICKS", "2"))
+BOND_CANCEL_DEDUP_MINS: int = int(os.getenv("BOND_CANCEL_DEDUP_MINS", "30"))
+BOND_KELLY_MIN_ROLLING_TRADES: int = int(os.getenv("BOND_KELLY_MIN_ROLLING_TRADES", "10"))
+BOND_EXEC_DEG_SAMPLE_SIZE: int = int(os.getenv("BOND_EXEC_DEG_SAMPLE_SIZE", "50"))
+BOND_EXEC_DEG_MIN_SAMPLES: int = int(os.getenv("BOND_EXEC_DEG_MIN_SAMPLES", "5"))
+BOND_EXEC_DEG_MAX_CAP: float = float(os.getenv("BOND_EXEC_DEG_MAX_CAP", "0.10"))
+BOND_VOLUME_SCALE_FLOOR: float = float(os.getenv("BOND_VOLUME_SCALE_FLOOR", "1000"))
+BOND_VOLUME_SCALE_MULT: float = float(os.getenv("BOND_VOLUME_SCALE_MULT", "50"))
+BOND_LIQUIDITY_SCALE_FLOOR: float = float(os.getenv("BOND_LIQUIDITY_SCALE_FLOOR", "100"))
+BOND_LIQUIDITY_SCALE_MULT: float = float(os.getenv("BOND_LIQUIDITY_SCALE_MULT", "5"))
+BOND_ROLLING_STATS_HOURS: int = int(os.getenv("BOND_ROLLING_STATS_HOURS", "24"))
+BOND_SCAN_MIN_INTERVAL: int = int(os.getenv("BOND_SCAN_MIN_INTERVAL", "60"))
+
+# -- Infrastructure tuning ----------------------------------------------------
+TASK_RESTART_DELAY: int = int(os.getenv("TASK_RESTART_DELAY", "10"))
+HEALTH_CHECK_TIMEOUT: float = float(os.getenv("HEALTH_CHECK_TIMEOUT", "5.0"))
+GAMMA_EVENT_TAG_MAX_PAGES: int = int(os.getenv("GAMMA_EVENT_TAG_MAX_PAGES", "10"))
+GAMMA_API_PAGE_SIZE: int = int(os.getenv("GAMMA_API_PAGE_SIZE", "100"))

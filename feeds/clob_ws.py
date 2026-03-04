@@ -230,14 +230,14 @@ def _parse_orderbook(raw: dict) -> dict | None:
             mid_price = 0.0
 
         # Compute and cache depth (sum of price*size for top levels)
-        ask_depth = sum(a["price"] * a["size"] for a in parsed_asks[:10])
-        bid_depth = sum(b["price"] * b["size"] for b in parsed_bids[:10])
+        ask_depth = sum(a["price"] * a["size"] for a in parsed_asks[:config.ORDERBOOK_DEPTH_LEVELS])
+        bid_depth = sum(b["price"] * b["size"] for b in parsed_bids[:config.ORDERBOOK_DEPTH_LEVELS])
 
         return {
             "market_id": market_id,
             "asset_id": raw.get("asset_id", ""),
-            "bids": parsed_bids[:10],
-            "asks": parsed_asks[:10],
+            "bids": parsed_bids[:config.ORDERBOOK_DEPTH_LEVELS],
+            "asks": parsed_asks[:config.ORDERBOOK_DEPTH_LEVELS],
             "best_bid": best_bid,
             "best_ask": best_ask,
             "spread": round(spread, 4),
@@ -264,7 +264,7 @@ def get_orderbook(token_id: str, max_age: float = 0) -> dict | None:
     if max_age > 0:
         import time as _time
         ts = ob.get("ts", 0)
-        if ts > 0 and (_time.time() - ts) > max_age:
+        if ts == 0 or (_time.time() - ts) > max_age:
             return None
     return ob
 

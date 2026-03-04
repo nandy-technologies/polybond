@@ -14,7 +14,10 @@ if not _env_file.is_file():
     import sys
     print(f"WARNING: .env file not found at {_env_file}", file=sys.stderr)
 load_dotenv(_env_file)
-load_dotenv(Path.home() / ".openclaw" / "workspace" / ".env", override=False)
+# Also check parent directories for a shared .env (e.g. workspace-level secrets)
+_parent_env = _project_root.parent / ".env"
+if _parent_env.is_file():
+    load_dotenv(_parent_env, override=False)
 
 # -- Polymarket API endpoints -------------------------------------------------
 CLOB_WS_URL: str = os.getenv(
